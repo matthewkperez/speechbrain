@@ -357,7 +357,9 @@ if __name__ == "__main__":
     # We dynamicaly add the tokenizer to our brain class.
     # NB: This tokenizer corresponds to the one used for the LM!!
     asr_brain.tokenizer = label_encoder
-
+    print(f"tokenizer: {asr_brain.tokenizer.lab2ind}")
+    print(f"tokenizer: {len(asr_brain.tokenizer.lab2ind.keys())}")
+    
     # Training
     asr_brain.fit(
         asr_brain.hparams.epoch_counter,
