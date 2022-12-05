@@ -543,8 +543,10 @@ class Brain:
         # Automatic mixed precision init
         if self.auto_mix_prec:
             self.scaler = torch.cuda.amp.GradScaler()
-            if self.checkpointer is not None:
-                self.checkpointer.add_recoverable("scaler", self.scaler)
+
+            # only add scaler recoverable if present
+            # if self.checkpointer is not None:
+                # self.checkpointer.add_recoverable("scaler", self.scaler)
 
         # List parameter count for the user
         total_params = sum(

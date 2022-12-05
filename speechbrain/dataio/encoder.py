@@ -993,6 +993,9 @@ class CTCTextEncoder(TextEncoder):
         if "blank_label" in special_labels:
             self.insert_blank(index=special_labels["blank_label"])
 
+        if "<flr>" in special_labels:
+            self.add_label()
+
         super().handle_special_labels(special_labels)
 
     def add_blank(self, blank_label=DEFAULT_BLANK):
