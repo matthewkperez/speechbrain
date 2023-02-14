@@ -2,6 +2,11 @@
 __pycache__/
 *.py[cod]
 *$py.class
+speechbrain.egg-info
+
+# Data
+AphasiaBank/data/
+AphasiaBank/results
 
 # C extensions
 *.so
