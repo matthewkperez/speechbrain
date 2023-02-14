@@ -1,7 +1,7 @@
 
 
 
-stage=2
+stage=5
 
 
 if [ $stage == 0 ] || [ $stage == 1 ]; then
@@ -32,47 +32,129 @@ if [ $stage == 0 ] || [ $stage == 1 ]; then
 fi
 
 if [ $stage == 0 ] || [ $stage == 2 ]; then
-    echo "Torre"
+    echo "Pretrain and Finetune"
     # subtype=("freeze_w2v" "last2_w2v")
     subtype=("last2_w2v")
     for index in "${!subtype[@]}"; do
         title=${subtype[${index}]}
         echo ${title}
-        exp_name="torre_preprocess"
+        # exp_name="torre_preprocess"
+        exp_name="personalization"
         out_yaml="/y/mkperez/speechbrain/AphasiaBank/hparams/${exp_name}/${title}.yaml"
         python yaml_helper.py -e ${exp_name} -s ${title} -o ${out_yaml}
         
         if [ $title == "last2_w2v" ]; then
-            og_pretrain="results/torre/freeze-True/wav2vec2-large-960h-lv60-self-2000/ep-20_lr-0.9_lr_w2v-0.0001"
-            # new_finetune="results/torre/freeze-True/wav2vec2-large-960h-lv60-self-2000"
-
-            lr_w2v="0.001"
-            lr="0.9"
-            new_finetune="results/torre/freeze-False/wav2vec2-large-960h-lv60-self-2000/lr-${lr}_lr_w2v-${lr_w2v}"
+            tr="train_all" # "train_no_kansas" = pts-12, "train_all" = pts-11
+            val="val_no_kansas"
+            og_pretrain="results/${exp_name}/freeze-True/tr-${tr}_val-${val}"
+            new_finetune="results/${exp_name}/freeze-False/tr-${tr}_val-${val}"
             if [ -d ${new_finetune} ]; then
                 echo "remove dir"
                 rm -r ${new_finetune}
             fi
             mkdir -p ${new_finetune}
-
             cp -r ${og_pretrain}/save ${new_finetune}
+        
+        elif [ $title == "personalize" ]; then
+            tr="train_no_kansas" # "train_no_kansas" = pts-12, "train_all" = pts-11
+            val="val_no_kansas"
+            og_pretrain="results/${exp_name}/freeze-False/tr-${tr}_val-${val}"
+            new_finetune="results/${exp_name}/freeze-False/tr-train_kansas_val-val_kansas"
+            if [ -d ${new_finetune} ]; then
+                echo "remove dir"
+                rm -r ${new_finetune}
+            fi
+            mkdir -p ${new_finetune}
+            cp -r ${og_pretrain}/save ${new_finetune}
+        
         fi
+
+        # exit
+        ### launch script
+        # CUDA_VISIBLE_DEVICES=0 python selective_training_torre.py ${out_yaml} &>logs/torre/FT_lr-${lr}_lr_w2v-${lr_w2v}.txt &
+        CUDA_VISIBLE_DEVICES=2 python selective_training_torre.py ${out_yaml}
+
+        # python analyze_wer.py -y ${out_yaml}
+    done
+fi
+
+if [ $stage == 0 ] || [ $stage == 3 ]; then
+    echo "Personalize"
+    kansas_wav_ar=(/z/public/data/AphasiaBank/Aphasia/Kansas/*.wav)
+    for index in "${!kansas_wav_ar[@]}"; do
+        title="personalize"
+        kansas_speaker_wav=`basename ${kansas_wav_ar[$index]}`
+        kansas_speaker=${kansas_speaker_wav%.wav}
+
+        exp_name="personalization"
+        out_yaml="/y/mkperez/speechbrain/AphasiaBank/hparams/${exp_name}/${title}.yaml"
+        python yaml_helper.py -e ${exp_name} -s ${title} -o ${out_yaml} -p $kansas_speaker
+    
+        if [ $title == "personalize" ]; then
+            tr="train_all" # "train_no_kansas" = pts-12, "train_all" = pts-11
+            val="val_no_kansas"
+            og_pretrain="results/${exp_name}/freeze-False/tr-${tr}_val-${val}"
+            new_finetune="results/${exp_name}/freeze-False/SD-${kansas_speaker}"
+            if [ -d ${new_finetune} ]; then
+                echo "remove dir"
+                rm -r ${new_finetune}
+            fi
+            mkdir -p ${new_finetune}
+            cp -r ${og_pretrain}/save ${new_finetune}
+        
+        fi
+        # exit
 
         ### launch script
         # CUDA_VISIBLE_DEVICES=0 python selective_training_torre.py ${out_yaml} &>logs/torre/FT_lr-${lr}_lr_w2v-${lr_w2v}.txt &
-        CUDA_VISIBLE_DEVICES=0 python selective_training_torre.py ${out_yaml}
-
-        python analyze_wer.py -y ${out_yaml}
+        CUDA_VISIBLE_DEVICES=2 python selective_training_torre.py ${out_yaml}
+        # exit
+        # python analyze_wer.py -y ${out_yaml}
     done
 fi
 
 
 
 
-if [ $stage == 0 ] || [ $stage == 2 ]; then
+if [ $stage == 0 ] || [ $stage == 4 ]; then
     echo "Manual run"
 
-    CUDA_VISIBLE_DEVICES=2 python selective_training_torre.py hparams/manual_run.yaml
+    stages="warmup FT" # warmup FT
+    for stage in $stages; do
+        out_yaml="/z/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/fluency/updated.yaml"
+        python yaml_helper.py -e "PT_FT" -s $stage -o $out_yaml
 
+    done
 
+    CUDA_VISIBLE_DEVICES=2 python train.py hparams/Duc_process/base.yaml
+fi
+
+if [ $stage == 0 ] || [ $stage == 5 ]; then
+    echo "Pretrain and Finetune based on fluency"
+    data_dir="/z/mkperez/speechbrain/AphasiaBank/data/Duc_process"
+    
+    # # # csv generation
+    # python helper_scripts/partition_PT-FT_data.py 'fluency' $data_dir
+
+    # PT_FT_list="PT FT"
+    fluent="Fluent" # Fluent Non-Fluent
+    PT_FT_list="FT" # PT FT
+    for PT_FT_var in $PT_FT_list; do
+        if [ $PT_FT_var == 'FT' ]; then
+            PT_path="/y/mkperez/speechbrain/AphasiaBank/results/duc_process/PT-FT_fluency/PT-${fluent}/No-LM_wav2vec2/freeze-False"
+            FT_path="/y/mkperez/speechbrain/AphasiaBank/results/duc_process/PT-FT_fluency/FT-${fluent}/No-LM_wav2vec2/freeze-False"
+            if [ ! -d FT_path ]; then
+                mkdir -p $FT_path
+                cp -r $PT_path/save $FT_path
+            fi
+        fi
+
+        out_yaml="/z/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/fluency/updated.yaml"
+        python yaml_helper.py -e "PT_FT" -s ${PT_FT_var} -o ${out_yaml} -f ${fluent} 
+        
+        # exit
+        CUDA_VISIBLE_DEVICES=1 python train.py $out_yaml
+    done
+
+    
 fi

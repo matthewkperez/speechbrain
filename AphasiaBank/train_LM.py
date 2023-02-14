@@ -49,7 +49,6 @@ def props(cls):
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-global check_var
 # Define training procedure
 class ASR(sb.Brain):
     def compute_forward(self, batch, stage):
@@ -57,12 +56,6 @@ class ASR(sb.Brain):
         batch = batch.to(self.device)
         wavs, wav_lens = batch.sig
         wavs, wav_lens = wavs.to(self.device), wav_lens.to(self.device)
-        # print(f"batch: {props(batch)}")
-        # print(f"id: {batch.id}")
-        # print(f"pre wavs: {wavs}, {wav_lens}")
-        # print(f"forward | w2v optimizer: {self.wav2vec_optimizer.state['lr']} | optimizer: {self.model_optimizer.state['lr']}")
-        # print(f"STATE w2v optimizer: {self.wav2vec_optimizer.param_groups[0]['lr']}")
-        # exit()
 
         # Add augmentation if specified
         if stage == sb.Stage.TRAIN:
@@ -91,26 +84,22 @@ class ASR(sb.Brain):
         # Compute outputs
         p_tokens = None
         logits = self.modules.ctc_lin(x)
-        p_ctc = self.hparams.log_softmax(logits)
+        p_ctc = self.hparams.log_softmax(logits)        
 
-        if stage != sb.Stage.TRAIN:
-            p_tokens = sb.decoders.ctc_greedy_decode(
-                p_ctc, wav_lens, blank_id=self.hparams.blank_index
-            )
+        hyps = None
+        if stage == sb.Stage.TEST:
+            hyps, _ = self.hparams.test_search(x.detach(), wav_lens)
 
-        return p_ctc, wav_lens, p_tokens
+        return p_ctc, wav_lens, p_tokens, hyps
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC+NLL) given predictions and targets."""
 
-        p_ctc, wav_lens, predicted_tokens = predictions
+        p_ctc, wav_lens, predicted_tokens, hyps = predictions
 
         ids = batch.id
         tokens, tokens_lens = batch.tokens
 
-        # print(f"batch: {props(batch)}")
-        # print(f"batch mtl: {batch.mtl}")
-        # exit()
 
         if hasattr(self.modules, "env_corrupt") and stage == sb.Stage.TRAIN:
             tokens = torch.cat([tokens, tokens], dim=0)
@@ -125,14 +114,33 @@ class ASR(sb.Brain):
             loss = loss_ctc
 
         if stage != sb.Stage.TRAIN:
-            # Decode token terms to words
-            predicted_words = [
-                "".join(self.tokenizer.decode_ndim(utt_seq)).split(" ")
-                for utt_seq in predicted_tokens
-            ]
-            target_words = [wrd.split(" ") for wrd in batch.wrd]
-            self.wer_metric.append(ids, predicted_words, target_words)
-            self.cer_metric.append(ids, predicted_words, target_words)
+            # # Decode token terms to words
+            # predicted_words = [
+            #     "".join(self.tokenizer.decode_ndim(utt_seq)).split(" ")
+            #     for utt_seq in predicted_tokens
+            # ]
+            # target_words = [wrd.split(" ") for wrd in batch.wrd]
+            # self.wer_metric.append(ids, predicted_words, target_words)
+            # self.cer_metric.append(ids, predicted_words, target_words)
+
+            current_epoch = self.hparams.epoch_counter.current
+            valid_search_interval = self.hparams.valid_search_interval
+            if current_epoch % valid_search_interval == 0 or (
+                stage == sb.Stage.TEST
+            ):
+                # Decode token terms to words
+                predicted_words = [
+                    self.tokenizer.decode_ids(utt_seq).split(" ") for utt_seq in hyps
+                ]
+                target_words = [wrd.split(" ") for wrd in batch.wrd]
+
+                predicted_chars = [
+                    list("".join(utt_seq)) for utt_seq in predicted_words
+                ]
+                target_chars = [list("".join(wrd.split())) for wrd in batch.wrd]
+                self.wer_metric.append(ids, predicted_words, target_words)
+                self.cer_metric.append(ids, predicted_chars, target_chars)
+
 
         return loss
 
@@ -382,10 +390,11 @@ def dataio_prepare(hparams):
     train_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["train_csv"], replacements={"data_root": data_folder},
     )
-    train_data.data = {k:{k_2: (int(v_2) if k_2 == 'severity_cat_num' else v_2) for k_2,v_2 in v.items()} for k,v in train_data.data.items()}
+
+    #convert severity_cat to int
+    train_data.data = {k:{k_2: (int(v_2) if k_2 == 'severity_cat' else v_2) for k_2,v_2 in v.items()} for k,v in train_data.data.items()}
     if hparams["sorting"] == "ascending":
         if 'tr_speaker' in hparams:
-            # print(train_data.data['kansas12a-59'])
             # create numeric speaker_id
             print(f"hparams: {hparams['tr_speaker']}")
             tr_speaker_int = int(re.findall(r'\d+', hparams["tr_speaker"])[0])
@@ -393,11 +402,11 @@ def dataio_prepare(hparams):
             # we sort training data to speed up training and get better results.
             train_data = train_data.filtered_sorted(sort_key="duration",
                 key_max_value={"duration": hparams["max_length"], 
-                    "severity_cat_num": hparams["max_sev_train"],
+                    "severity_cat": hparams["max_sev_train"],
                     "spk_id": tr_speaker_int
                 },
                 key_min_value={"duration": hparams["min_length"], 
-                    "severity_cat_num": hparams["min_sev_train"],
+                    "severity_cat": hparams["min_sev_train"],
                     "spk_id": tr_speaker_int
                 },
             )
@@ -405,8 +414,8 @@ def dataio_prepare(hparams):
         else:
             # we sort training data to speed up training and get better results.
             train_data = train_data.filtered_sorted(sort_key="duration",
-                key_max_value={"duration": hparams["max_length"], "severity_cat_num": hparams["max_sev_train"]},
-                key_min_value={"duration": hparams["min_length"], "severity_cat_num": hparams["min_sev_train"]},
+                key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
+                key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
 
             )
         # when sorting do not shuffle in dataloader ! otherwise is pointless
@@ -480,11 +489,11 @@ def dataio_prepare(hparams):
     label_encoder = sb.dataio.encoder.CTCTextEncoder()
 
     # 3. Define text pipeline:
-    @sb.utils.data_pipeline.takes("wrd", "severity_cat_num")
+    @sb.utils.data_pipeline.takes("wrd", "severity_cat")
     @sb.utils.data_pipeline.provides(
         "wrd", "char_list", "tokens_list", "tokens", "mtl"
     )
-    def text_pipeline(wrd, severity_cat_num):
+    def text_pipeline(wrd, severity_cat):
         yield wrd
         char_list = list(wrd)
         yield char_list
@@ -492,7 +501,7 @@ def dataio_prepare(hparams):
         yield tokens_list
         tokens = torch.LongTensor(tokens_list)
         yield tokens
-        yield severity_cat_num
+        yield severity_cat
 
 
     sb.dataio.dataset.add_dynamic_item(datasets, text_pipeline)
@@ -522,7 +531,6 @@ def dataio_prepare(hparams):
 
 
     print(f"train: {len(train_data.data)} -> {len(train_data.data_ids)} | val: {len(valid_data.data)} -> {len(valid_data.data_ids)} | test: {len(test_data.data)} -> {len(test_data.data_ids)}")
-    # exit()
     return train_data, valid_data, test_data, label_encoder
 
 def prep_exp_dir(hparams):
@@ -571,7 +579,6 @@ if __name__ == "__main__":
     asr_brain.tokenizer = label_encoder
     print(f"tokenizer: {asr_brain.tokenizer.lab2ind}")
     print(f"tokenizer: {len(asr_brain.tokenizer.lab2ind.keys())}")
-    # exit()
     
     # asr_brain.modules = asr_brain.modules.float()
     count_parameters(asr_brain.modules)

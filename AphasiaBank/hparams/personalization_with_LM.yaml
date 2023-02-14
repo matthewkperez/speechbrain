@@ -41,6 +41,7 @@ max_length: 10 # change to 20
 min_length: 0.5
 max_sev_train: 4
 min_sev_train: -1
+tr_speaker: personalized_speaker_PLACEHOLDER
 batch_size: batch_size_PLACEHOLDER # start with 16, change to 2
 test_batch_size: 2
 grad_accumulation_factor: grad_acc_PLACEHOLDER

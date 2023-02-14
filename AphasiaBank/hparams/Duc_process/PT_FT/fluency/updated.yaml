@@ -6,32 +6,32 @@
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
 seed: 2000
-lr: lr_decoder_PLACEHOLDER
-lr_wav2vec: lr_w2v2_PLACEHOLDER
-number_of_epochs: epoch_PLACEHOLDER
-# w2v_model: wav2vec2-large-xlsr-53
-w2v_model: wav2vec2-large-960h-lv60-self
+lr: 0.55
+lr_wav2vec: 8.e-5
+number_of_epochs: 30
+freeze_wav2vec: False
+freeze_feature_extractor_wav2vec: True # procs when freeze_wav2vec = False, only retrain transformers
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
-output_folder: exp_out_folder_PLACEHOLDER
+output_folder: !ref results/duc_process/PT-FT_fluency/FT-Fluent/No-LM_wav2vec2/freeze-<freeze_wav2vec>
 wer_file: !ref <output_folder>/wer.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
-data_dir: data_dir_PLACEHOLDER
-data_folder: !ref <data_dir>
-mtl_flag: mtl_PLACEHOLDER
+# data_dir: /z/mkperez/speechbrain/AphasiaBank/data/Duc_process
+data_folder: !ref /z/mkperez/speechbrain/AphasiaBank/data/Duc_process/PT_FT-fluency/Fluent
+mtl_flag: False
 
 # URL for the biggest Fairseq english wav2vec2 model.
-wav2vec2_hub: !ref facebook/<w2v_model>
+wav2vec2_hub: !ref facebook/wav2vec2-large-960h-lv60-self
 
 # Data files
 train_splits: ["train"]
-dev_splits: ["val"]
+dev_splits: ["dev"]
 test_splits: ["test"]
 skip_prep: False
 ckpt_interval_minutes: 25 # save checkpoint every N min
-train_csv: !ref <data_dir>/train_data_PLACEHOLDER
-valid_csv: !ref <data_dir>/val_data_PLACEHOLDER
-test_csv: !ref <data_dir>/test_data_PLACEHOLDER
+train_csv: !ref <data_folder>/FT_train.csv
+valid_csv: !ref <data_folder>/FT_dev.csv
+test_csv: !ref <data_folder>/test.csv
 
 # Training parameters
 sorting: ascending
@@ -41,9 +41,9 @@ max_length: 10 # change to 20
 min_length: 0.5
 max_sev_train: 4
 min_sev_train: -1
-batch_size: batch_size_PLACEHOLDER # start with 16, change to 2
+batch_size: 3 # start with 16, change to 2
 test_batch_size: 2
-grad_accumulation_factor: grad_acc_PLACEHOLDER
+grad_accumulation_factor: 16
 
 # Dataloader options
 train_dataloader_opts:
@@ -59,8 +59,6 @@ test_dataloader_opts:
 activation: !name:torch.nn.LeakyReLU
 dnn_layers: 2
 dnn_neurons: 1024
-freeze_wav2vec: freeze_PLACEHOLDER
-freeze_feature_extractor_wav2vec: True # procs when freeze_wav2vec = False, only retrain transformers
 
 # Outputs 28 = tokenizer for greedy CTC 
 output_neurons: 28  # BPE size, index(blank/eos/bos) = 0
@@ -133,14 +131,14 @@ wav2vec_opt_class: !name:torch.optim.Adam
 lr_annealing_model: !new:speechbrain.nnet.schedulers.NewBobScheduler
    initial_value: !ref <lr>
    improvement_threshold: 0.0025
-   annealing_factor: lr_anneal_factor_decoder_PLACEHOLDER
-   patient: patience_PLACEHOLDER
+   annealing_factor: 0.8
+   patient: 1
 
 lr_annealing_wav2vec: !new:speechbrain.nnet.schedulers.NewBobScheduler
    initial_value: !ref <lr_wav2vec>
    improvement_threshold: 0.0025
-   annealing_factor: lr_anneal_factor_w2v2_PLACEHOLDER
-   patient: patience_PLACEHOLDER
+   annealing_factor: 0.9
+   patient: 1
 
 label_encoder: !new:speechbrain.dataio.encoder.CTCTextEncoder
 
