@@ -162,7 +162,8 @@ class HuggingFaceWav2Vec2(nn.Module):
                     # self.model.encoder.layers[i]._freeze_parameters()
                     for param in self.model.encoder.layers[i].parameters():
                         param.requires_grad = True
-
+        # print(f"model: {self.model}")
+        # exit()
         self.output_all_hiddens = output_all_hiddens
 
     def _from_pretrained(self, source, config, model, save_path):
@@ -295,7 +296,7 @@ class HuggingFaceWav2Vec2(nn.Module):
 
         if self.normalize_wav:
             wav = F.layer_norm(wav, wav.shape)
-
+    
         # Extract wav2vec output
         out = self.model(wav, output_hidden_states=True)
 
@@ -407,7 +408,6 @@ class HuggingFaceWav2Vec2Pretrain(nn.Module):
         # value.
         full_sentence_indices = np.ones((batch_size, sequence_length))
 
-        # print(np.sum(mask_time_indices, axis=1))
         negative_sample_indices = torch.tensor(
             transformers.models.wav2vec2.modeling_wav2vec2._sample_negative_indices(
                 (batch_size, sequence_length),

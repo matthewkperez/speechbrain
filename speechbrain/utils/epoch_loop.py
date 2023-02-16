@@ -68,6 +68,7 @@ class EpochCounter:
                 self.current = saved_value - 1
 
 
+@register_checkpoint_hooks
 class EpochCounterWithStopper(EpochCounter):
     """An epoch counter which can save and recall its state, integrating an early stopper by tracking a target metric.
 
@@ -123,6 +124,7 @@ class EpochCounterWithStopper(EpochCounter):
         """Returns True is training should stop (based on the performance
         metrics)."""
         should_stop = False
+        print(f"Epoch Counter: cur-ep={current}, best-ep={self.best_limit}, limit={self.limit_to_stop}")
         if current > self.limit_warmup:
             if self.sign * current_metric < self.sign * (
                 (1 - self.min_delta) * self.th
@@ -131,3 +133,27 @@ class EpochCounterWithStopper(EpochCounter):
                 self.th = current_metric
             should_stop = (current - self.best_limit) >= self.limit_to_stop
         return should_stop
+
+    @mark_as_saver
+    def _save(self, path):
+        with open(path, "w") as fo:
+            fo.write(f"current: {str(self.current)}\n")
+            fo.write(f"best_epoch: {str(self.best_limit)}\n")
+            fo.write(f"best_loss: {str(self.th)}\n")
+
+    @mark_as_loader
+    def _recover(self, path, end_of_epoch=True, device=None):
+        # NOTE: end_of_epoch = True by default so that when
+        #  loaded in parameter transfer, this starts a new epoch.
+        #  However, parameter transfer to EpochCounter should
+        #  probably never be used really.
+        del device  # Not used.
+        with open(path) as fi:
+            # print(fi.readlines())
+            current = int(fi.readline().split()[-1].strip())
+            self.best_limit = int(fi.readline().split()[-1].strip())
+            self.th = float(fi.readline().split()[-1].strip())
+            if end_of_epoch:
+                self.current = current
+            else:
+                self.current = current - 1

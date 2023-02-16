@@ -1082,6 +1082,7 @@ class Brain:
 
                 # Only run validation "on_stage_end" on main process
                 self.step = 0
+                self.valid_loss = avg_valid_loss # needed for epoch_counter_Stop
                 run_on_main(
                     self.on_stage_end,
                     args=[Stage.VALID, avg_valid_loss, epoch],
@@ -1164,8 +1165,14 @@ class Brain:
 
         # Iterate epochs
         for epoch in epoch_counter:
+
             self._fit_train(train_set=train_set, epoch=epoch, enable=enable)
             self._fit_valid(valid_set=valid_set, epoch=epoch, enable=enable)
+
+            # epoch_counter
+            if epoch_counter.should_stop(current=epoch,current_metric=self.valid_loss):
+                epoch_counter.current = epoch_counter.limit  # skipping unpromising epochs, set curr_epoch to last epoch
+                print("early stopping proc")
 
             # Debug mode only runs a few epochs
             if (
