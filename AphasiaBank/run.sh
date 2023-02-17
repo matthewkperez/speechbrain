@@ -137,8 +137,8 @@ if [ $stage == 0 ] || [ $stage == 5 ]; then
     # python helper_scripts/partition_PT-FT_data.py 'fluency' $data_dir
 
     # PT_FT_list="PT FT"
-    fluent="Fluent" # Fluent Non-Fluent
-    PT_FT_list="FT" # PT FT
+    fluent="Fluent Non-Fluent" # Fluent Non-Fluent
+    PT_FT_list="PT" # PT FT
     for PT_FT_var in $PT_FT_list; do
         if [ $PT_FT_var == 'FT' ]; then
             PT_path="/y/mkperez/speechbrain/AphasiaBank/results/duc_process/PT-FT_fluency/PT-${fluent}/No-LM_wav2vec2/freeze-False"
@@ -153,7 +153,7 @@ if [ $stage == 0 ] || [ $stage == 5 ]; then
         python yaml_helper.py -e "PT_FT" -s ${PT_FT_var} -o ${out_yaml} -f ${fluent} 
         
         # exit
-        CUDA_VISIBLE_DEVICES=1 python train.py $out_yaml
+        CUDA_VISIBLE_DEVICES=0,1,2,3 python train.py $out_yaml
     done
 
     
