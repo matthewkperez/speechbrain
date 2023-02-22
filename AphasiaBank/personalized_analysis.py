@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import re
 import jiwer
 import Levenshtein
+from sklearn.metrics import confusion_matrix
 
 
 def SD_analysis(args):
@@ -318,6 +319,7 @@ def read_transcript_wer(wer_file):
     return df with dysfluency count
     '''
     df_list = []
+    char_df_list = []
     with open(wer_file, 'r') as r:
         stage = 0
         dys_dict = {'ins':{}, 'del':{}, 'sub':{}, 'err':{}}
@@ -329,29 +331,67 @@ def read_transcript_wer(wer_file):
                 stage = 1
             elif stage==1:
                 # ground truth
-                ground_truth_arr = line.split(" ; ")
+                ground_truth_arr = [x.strip() for x in line.split(";")]
                 stage=2
             elif stage == 2:
-                dys_arr = line.split(" ; ")
+                # dys
+                dys_arr = [x.strip() for x in line.split(";")]
                 assert(len(dys_arr) == len(ground_truth_arr))
-                stage = 0
+                stage = 3
 
-                
-
-                for gt, dys in zip(ground_truth_arr, dys_arr):
+            elif stage==3:
+                # prediction
+                prediction_arr = [x.strip() for x in line.split(";")]
+                stage=0
+                # print(ground_truth_arr)
+                # print(dys_arr)
+                # print(prediction_arr)
+                for gt, dys, pred in zip(ground_truth_arr, dys_arr, prediction_arr):
                     gt = gt.strip()
                     dys = dys.strip()
                     # dys_key = {'I':'ins', 'D':'del', 'S':'sub'}
-                    if dys not in ['I']:
-                        df_loc = pd.DataFrame({
+
+                    if dys == 'S':
+                        edits = Levenshtein.editops(pred, gt)
+                        for tup in edits:
+                            edit_code = tup[0]
+                            if edit_code == 'replace':
+                                char_df_loc = pd.DataFrame({
+                                    'spkr': [spkr_id],
+                                    'dys': [dys],
+                                    'word': [gt],
+                                    'pred_c': [pred[tup[1]]],
+                                    'gt_c': [gt[tup[2]]],
+                                })
+                                char_df_list.append(char_df_loc)
+            
+                    elif dys == '=':
+                        # print(gt, pred)
+                        for i in range(len(gt)):
+                            char_df_loc = pd.DataFrame({
                                 'spkr': [spkr_id],
                                 'dys': [dys],
                                 'word': [gt],
-                        })
-                        df_list.append(df_loc)
-                
+                                'pred_c': [pred[i]],
+                                'gt_c': [gt[i]],
+                            })
+                            char_df_list.append(char_df_loc)
+
+
+
+
+                    df_loc = pd.DataFrame({
+                            'spkr': [spkr_id],
+                            'dys': [dys],
+                            'word': [gt],
+                    })
+                    df_list.append(df_loc)
+
+
+
     df = pd.concat(df_list)
-    return df
+    char_df = pd.concat(char_df_list)
+    return df,char_df
 
 def transcript_wer_analysis(wdir, wer_file,n):
     '''
@@ -364,62 +404,33 @@ def transcript_wer_analysis(wdir, wer_file,n):
     if not os.path.exists(wdir):
         os.makedirs(wdir)
 
+    df, char_df = read_transcript_wer(wer_file)
 
-    # compute_bool=True
-    # df_file = f"{wdir}/dys_df.csv"
-    # if compute_bool:
-    #     df = read_transcript_wer(wer_file)
-    #     df.to_csv(df_file)
-    # else:
-    #     df = pd.read_csv(df_file)
-
-    df = read_transcript_wer(wer_file)
-
-    # compute top/bot n words
-    word_group = df.groupby("word")
-    df_lst = []
-    for k in tqdm(word_group.groups.keys()):
-        word_df = word_group.get_group(k)
-        corr = len(word_df[word_df['dys'] == '='])
-        err = len(word_df[word_df['dys'] != '='])
-
-        df_loc = pd.DataFrame({
-            'word': [k],
-            'err_count': [err],
-            # 'correct_count': [corr],
-            'total_count': [corr+err],
-            'err_pct': [err/(corr+err)]
-        })
-        df_lst.append(df_loc)
-    err_df = pd.concat(df_lst).sort_values(by=['err_pct'])
-    err_df = err_df[err_df['total_count'] > 100] # filter rare words
-    err_df=err_df.drop(columns='total_count')
-
-    # filter top and bottom
-    top_n = err_df.head(n)
-    bot_n = err_df.tail(n)
-    result_df = pd.concat([top_n,bot_n])
-    result_df.to_csv(f"{wdir}/top_word_errs.csv")
+    # distribution of I, D, S in df
+    dys_series = df['dys'].value_counts()
+    dys_series.to_csv(f"{wdir}/word_IDS_distribution.csv")
 
 
-
+    # Confusion matrix of character sub
+    char_df = char_df[~char_df['pred_c'].isin([' ',';','<','>'])]
+    gt = char_df['gt_c'].values
+    pred = char_df['pred_c'].values
+    print(f"gt: {sorted(set(gt))}")
+    print(f"pred: {sorted(set(pred))}")
+    label_union = sorted(list(set(gt) | set(pred)))
+    cm = confusion_matrix(gt,pred,labels=label_union)
+    cm_pct = cm / np.sum(cm)
+    # print(cm_pct)
     
-def transcript_cer_analysis(wdir, wer_file,n):
-    '''
-    Examine character error between different factors
-    Most common missed characters for each speaker
-    '''
-    if not os.path.exists(wdir):
-        os.makedirs(wdir)
+    cross_tab = pd.crosstab(gt, pred, normalize='index')
+    # convert to 2d matrix with counts
+    plt.clf()
+    # ax = sns.heatmap(cm_pct, annot=False, vmax=0.01, vmin=0)
+    ax = sns.heatmap(cross_tab, annot=False)
+    ax.set(xlabel="Pred", ylabel="Ground Truth", title="Character Substitution Errors")
+    fig = ax.get_figure()
+    fig.savefig(f"{wdir}/char_heatmap.png")
 
-
-    compute_bool=True
-    df_file = f"{wdir}/dys_df.csv"
-    if compute_bool:
-        df = read_transcript_wer(wer_file)
-        df.to_csv(df_file)
-    else:
-        df = pd.read_csv(df_file)
 
 
     # compute top/bot n words
@@ -447,15 +458,7 @@ def transcript_cer_analysis(wdir, wer_file,n):
     bot_n = err_df.tail(n)
     result_df = pd.concat([top_n,bot_n])
     result_df.to_csv(f"{wdir}/top_word_errs.csv")
-
-
-
-
-    general_file = f"{wdir}/general_file.txt"
-    with open(general_file, 'w') as w:
-        w.write(f"file: {wer_file}")
-    
-
+     
 def pk_dys_df(gt,target):
     # return df
     with open(gt, 'r') as r:
@@ -470,10 +473,9 @@ def pk_dys_df(gt,target):
     g=0
     t=0
     df_lst=[]
+    cer_edits=0
+    cer_total=0
     for g,_ in enumerate(tqdm(gt_lines)):
-
-    # while g < len(gt_lines) and t < len(tar_lines):
-        # print(g)
         g_spkr, gline = gt_lines[g].split(" ", 1)
 
         if len(tar_lines[t].split()) > 1:
@@ -485,10 +487,15 @@ def pk_dys_df(gt,target):
         if g_spkr == t_spkr:
             # print(gline)
             # print(tline)
-            # editops = Levenshtein.editops(gline, tline)
-            # print(editops)
+
+            edits = Levenshtein.distance(gline, tline)
+            # cer = edits/len(gline)
+            cer_edits+=edits
+            cer_total+=len(gline)
 
             # measures = jiwer.compute_measures(gline, tline)
+            # print(measures)
+            # exit()
 
             gt_processed, tar_processed = jiwer.measures._preprocess([gline],[tline],jiwer.wer_default,jiwer.wer_default)
             # print(gt_processed, tar_processed)
@@ -518,9 +525,9 @@ def pk_dys_df(gt,target):
             g+=1
     
     df = pd.concat(df_lst)
-    return df
+    return df, cer_edits/cer_total
 
-def pk_transcript_wer_analysis(wdir, gt, target, n):
+def pk_transcript_wer_analysis(wdir, gt, target, n,w):
     '''
     for pytorch_kaldi docs
     used in general case to examine word errors between transcripts
@@ -535,7 +542,7 @@ def pk_transcript_wer_analysis(wdir, gt, target, n):
 
     
     # df = ins, del, corr
-    df = pk_dys_df(gt,target)
+    df,cer = pk_dys_df(gt,target)
 
 
     # compute top/bot n words
@@ -564,6 +571,9 @@ def pk_transcript_wer_analysis(wdir, gt, target, n):
     result_df = pd.concat([top_n,bot_n])
     result_df.to_csv(f"{wdir}/top_word_errs.csv")
 
+    print(f"cer: {cer}")
+    w.write(f"cer: {cer}\n")
+
 def main():
     # output csv to result_dir
     parser = argparse.ArgumentParser(
@@ -582,7 +592,7 @@ def main():
 
     if args.baseline and args.target and args.fluency:
         '''
-        python personalized_analysis.py -b /z/mkperez/speechbrain/AphasiaBank/results/duc_process/No-LM/wav2vec2-large-960h-lv60-self/freeze-False -t /z/mkperez/speechbrain/AphasiaBank/results/duc_process/PT-FT_fluency/FT-Fluent/No-LM_wav2vec2/freeze-False -f Fluent
+        python personalized_analysis.py -b /z/mkperez/speechbrain/AphasiaBank/results/duc_process/No-LM/wav2vec2-large-960h-lv60-self/freeze-False -t /z/mkperez/speechbrain/AphasiaBank/results/duc_process/PT-FT_fluency/FT-Non-Fluent/No-LM_wav2vec2/freeze-False -f Non-Fluent
         '''
         print("fluency analysis")
         fluency_analysis(args)
@@ -594,7 +604,7 @@ def main():
         SD_analysis(args)
     elif args.target:
         '''
-        python personalized_analysis.py -t /z/mkperez/speechbrain/AphasiaBank/results/duc_process/No-LM/wav2vec2-large-960h-lv60-self/freeze-False
+        python personalized_analysis.py -t /y/mkperez/speechbrain/AphasiaBank/results/duc_process_ES/No-LM/hubert-large-ls960-ft/freeze-True
         '''
         model = args.target.split("/")[8]
         analysis_dir = f"analysis/transcript/{model}"
@@ -604,10 +614,9 @@ def main():
             w.write(f"{args.target}\n")
 
         transcript_wer_analysis(analysis_dir, f"{args.target}/wer.txt",5)
-    
     elif args.pytorch_kaldi:
         '''
-        python personalized_analysis.py -pk /z/mkperez/pytorch-kaldi/exp/MTL_AB_BLSTM_mfb_filter-10s/decode_AB_test_out_senone/scoring_kaldi/best_wer_10ep
+        python personalized_analysis.py -pk /z/mkperez/pytorch-kaldi/exp/MTL_AB_BLSTM_mfb_filter-10s/decode_AB_test_out_senone/scoring_kaldi/best_wer
         '''
         model = args.pytorch_kaldi.split("/")[5]
         analysis_dir = f"analysis/transcript/{model}"
@@ -616,18 +625,19 @@ def main():
         with open(f"{analysis_dir}/README", 'w') as w:
             w.write(f"{args.pytorch_kaldi}\n")
         
-        # get gt file
-        score_kaldi_dir = "/".join(args.pytorch_kaldi.split("/")[:-1])
-        gt_file = f"{score_kaldi_dir}/test_filt.txt"
-   
-        # get best target file
-        with open(args.pytorch_kaldi, 'r') as r:
-            line= r.readline()
-            best_wer_file = line.split()[-1]
-        penality_weight = best_wer_file.split("_")[-1]
-        wer_num = best_wer_file.split("_")[-2]
-        target_file=f"{score_kaldi_dir}/penalty_{penality_weight}/{wer_num}.txt"
-        pk_transcript_wer_analysis(analysis_dir, gt_file, target_file,5)
+            # get gt file
+            score_kaldi_dir = "/".join(args.pytorch_kaldi.split("/")[:-1])
+            gt_file = f"{score_kaldi_dir}/test_filt.txt"
+    
+            # get best target file
+            with open(args.pytorch_kaldi, 'r') as r:
+                line= r.readline()
+                best_wer_file = line.split()[-1]
+            penality_weight = best_wer_file.split("_")[-1]
+            wer_num = best_wer_file.split("_")[-2]
+            target_file=f"{score_kaldi_dir}/penalty_{penality_weight}/{wer_num}.txt"
+            pk_transcript_wer_analysis(analysis_dir, gt_file, target_file,5,w)
+
         
 
     else:
