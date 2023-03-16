@@ -24,8 +24,8 @@ from speechbrain.pretrained.fetching import fetch
 # We check if transformers is installed.
 try:
     import transformers
-    from transformers import Wav2Vec2Model, HubertModel, WavLMModel
-    from transformers import Wav2Vec2Config, HubertConfig, WavLMConfig
+    from transformers import Wav2Vec2Model, HubertModel, WavLMModel, WhisperModel
+    from transformers import Wav2Vec2Config, HubertConfig, WavLMConfig, WhisperConfig
     from transformers import Wav2Vec2FeatureExtractor
     from transformers import Wav2Vec2ForPreTraining
     from transformers.models.wav2vec2.modeling_wav2vec2 import (
@@ -43,12 +43,14 @@ HF_models = {
     "wav2vec2": Wav2Vec2Model,
     "hubert": HubertModel,
     "wavlm": WavLMModel,
+    "whisper": WhisperModel,
 }
 
 HF_config = {
     "wav2vec2": Wav2Vec2Config,
     "hubert": HubertConfig,
     "wavlm": WavLMConfig,
+    "whisper": WhisperConfig,
 }
 
 
@@ -115,6 +117,8 @@ class HuggingFaceWav2Vec2(nn.Module):
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
             source, cache_dir=save_path
         )
+        # print(f"source: {source}")
+        # exit()
 
         # Select specific self-supervised loader (eg. Wav2Vec2, Hubert)
         if "hubert" in source:
@@ -123,6 +127,9 @@ class HuggingFaceWav2Vec2(nn.Module):
         elif "wavlm" in source:
             config = HF_config.get("wavlm")
             model = HF_models.get("wavlm")
+        elif "whisper" in source:
+            config = HF_config.get("whisper")
+            model = HF_models.get("whisper")
         else:
             config = HF_config.get("wav2vec2")
             model = HF_models.get("wav2vec2")
@@ -158,7 +165,7 @@ class HuggingFaceWav2Vec2(nn.Module):
                 # self.model.feature_extractor._freeze_parameters()
                 
                 # unfreeze last two layers everything but last 2 layers
-                for i in [-1, -2]:
+                for i in [-1]:
                     # self.model.encoder.layers[i]._freeze_parameters()
                     for param in self.model.encoder.layers[i].parameters():
                         param.requires_grad = True

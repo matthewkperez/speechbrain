@@ -1163,9 +1163,13 @@ class Brain:
         # Only show progressbar if requested and main_process
         enable = progressbar and sb.utils.distributed.if_main_process()
 
+        # epoch_counter (load from checkpoint)
+        if epoch_counter.should_stop(current=epoch_counter.current,current_metric=float('inf')):
+            epoch_counter.current = epoch_counter.limit  # skipping unpromising epochs, set curr_epoch to last epoch
+            print("early stopping proc")
+
         # Iterate epochs
         for epoch in epoch_counter:
-
             self._fit_train(train_set=train_set, epoch=epoch, enable=enable)
             self._fit_valid(valid_set=valid_set, epoch=epoch, enable=enable)
 
