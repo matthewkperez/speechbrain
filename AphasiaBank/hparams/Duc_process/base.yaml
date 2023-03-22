@@ -6,27 +6,30 @@
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
 seed: 2000
-lr: 0.6
+lr: 0.9
 lr_wav2vec: 0.0000008
-number_of_epochs: 30
+number_of_epochs: 100
 # w2v_model: wav2vec2-large-xlsr-53
 # w2v_model: wav2vec2-large-960h-lv60-self
 # w2v_model: hubert-large-ls960-ft
-w2v_model: whisper-large-v2
+# w2v_model: whisper-large-v2
+w2v_model: wavlm-large
 freeze_wav2vec: False
 freeze_feature_extractor_wav2vec: True # procs when freeze_wav2vec = False, only retrain transformers
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
-output_folder: !ref results/duc_process/No-LM/<w2v_model>
+output_folder: !ref results/duc_process_ES/No-LM/<w2v_model>-mtl_paraphasia/freeze-<freeze_wav2vec>
 wer_file: !ref <output_folder>/wer.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
 data_dir: /z/mkperez/speechbrain/AphasiaBank/data/Duc_process
+# data_dir: /z/mkperez/speechbrain/AphasiaBank/data/Duc_process/mtl_paraphasia
 data_folder: !ref <data_dir>
 mtl_flag: False
 
 # URL for the biggest Fairseq english wav2vec2 model.
 # wav2vec2_hub: !ref facebook/<w2v_model>
-wav2vec2_hub: !ref openai/<w2v_model>
+# wav2vec2_hub: !ref openai/<w2v_model>
+wav2vec2_hub: !ref microsoft/<w2v_model>
 
 # Data files
 train_splits: ["train"]
@@ -47,7 +50,7 @@ min_length: 0.5
 max_sev_train: 4
 min_sev_train: -1
 batch_size: 3 # 32,3
-test_batch_size: 3 # 32,3
+test_batch_size: 1 # 32,3
 grad_accumulation_factor: 16 #4,16
 
 # Dataloader options
@@ -74,15 +77,18 @@ blank_index: 0
 #
 # Functions and classes
 #
-epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
    limit: !ref <number_of_epochs>
+   limit_to_stop: 3
+   limit_warmup: 5
+   direction: "min"
 
 augmentation: !new:speechbrain.lobes.augment.TimeDomainSpecAugment
    sample_rate: !ref <sample_rate>
    speeds: [80, 90, 95, 100, 105, 110, 120]
 
 enc: !new:speechbrain.lobes.models.VanillaNN.VanillaNN
-   input_shape: [null, null, 768] # neurons must match that of model
+   input_shape: [null, null, 1024] # neurons must match that of model
    activation: !ref <activation>
    dnn_blocks: !ref <dnn_layers>
    dnn_neurons: !ref <dnn_neurons>
