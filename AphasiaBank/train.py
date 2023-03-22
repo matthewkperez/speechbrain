@@ -409,6 +409,7 @@ def dataio_prepare(hparams):
                 key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
 
             )
+
         # when sorting do not shuffle in dataloader ! otherwise is pointless
         hparams["train_dataloader_opts"]["shuffle"] = False
     elif hparams["sorting"] == "descending":
@@ -571,7 +572,7 @@ if __name__ == "__main__":
     asr_brain.tokenizer = label_encoder
     print(f"tokenizer: {asr_brain.tokenizer.lab2ind}")
     print(f"tokenizer: {len(asr_brain.tokenizer.lab2ind.keys())}")
-    # exit()
+    exit()
     
     # asr_brain.modules = asr_brain.modules.float()
     count_parameters(asr_brain.modules)

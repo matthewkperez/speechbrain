@@ -159,16 +159,15 @@ class HuggingFaceWav2Vec2(nn.Module):
             self.model.train()
             if self.freeze_feature_extractor:
                 # model freezing
-#                 # freeze entire modal
-#                 for param in self.model.parameters():
-#                     param.requires_grad = False
-#                 # self.model.feature_extractor._freeze_parameters()
+                # freeze entire modal
+                for param in self.model.parameters():
+                    param.requires_grad = False
                 
-#                 # unfreeze last two layers everything but last 2 layers
-#                 for i in [-1]:
-#                     # self.model.encoder.layers[i]._freeze_parameters()
-#                     for param in self.model.encoder.layers[i].parameters():
-#                         param.requires_grad = True
+                # unfreeze last two layers everything but last layer
+                for i in [-1]:
+                    # self.model.encoder.layers[i]._freeze_parameters()
+                    for param in self.model.encoder.layers[i].parameters():
+                        param.requires_grad = True
 
                 logger.warning(
                     "speechbrain.lobes.models.huggingface_wav2vec - wav2vec 2.0 feature extractor is frozen."

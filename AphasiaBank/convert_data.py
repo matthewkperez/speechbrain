@@ -109,7 +109,7 @@ def read_text_data(text_file):
 
 def prepare_duc_data():
     duc_src_dir="/z/mkperez/AphasiaBank/kd_updated/Aphasia+Control/ASR_fold_5"
-    target_dir="/z/mkperez/speechbrain/AphasiaBank/data/Duc_process"
+    target_dir="/z/mkperez/speechbrain/AphasiaBank/data/Duc_process/revised"
     seg_wav_bool = False
 
     # scores
