@@ -108,17 +108,18 @@ class ASR(sb.Brain):
         tokens, tokens_lens = batch.tokens
 
 
+
         if hasattr(self.modules, "env_corrupt") and stage == sb.Stage.TRAIN:
             tokens = torch.cat([tokens, tokens], dim=0)
             tokens_lens = torch.cat([tokens_lens, tokens_lens], dim=0)
 
         loss_ctc = self.hparams.ctc_cost(p_ctc, tokens, wav_lens, tokens_lens)
 
-        # multitask
-        if self.hparams.mtl_flag:
-            loss = loss_ctc
-        else:
-            loss = loss_ctc
+        # # multitask
+        # if self.hparams.mtl_flag:
+        #     loss = loss_ctc
+        # else:
+        loss = loss_ctc
 
         if stage != sb.Stage.TRAIN:
             # Decode token terms to words
@@ -134,6 +135,7 @@ class ASR(sb.Brain):
 
     def fit_batch(self, batch):
         should_step = self.step % self.grad_accumulation_factor == 0
+
         # Managing automatic mixed precision
         if self.auto_mix_prec:
             self.wav2vec_optimizer.zero_grad()
@@ -146,7 +148,6 @@ class ASR(sb.Brain):
             # new
             with self.no_sync(not should_step):
                 self.scaler.scale(loss / self.grad_accumulation_factor).backward()
-
 
             if should_step:
                 if not self.hparams.freeze_wav2vec:
@@ -162,19 +163,13 @@ class ASR(sb.Brain):
             outputs = self.compute_forward(batch, sb.Stage.TRAIN)
             loss = self.compute_objectives(outputs, batch, sb.Stage.TRAIN)
             (loss / self.grad_accumulation_factor).backward()
-            # print(self.modules.enc)
-            # print(f"Lin weight grad: {self.modules.enc.linear.w.weight.grad.isnan().any()}")
-            # print(f"Lin bias grad: {self.modules.enc.linear.w.bias.grad.isnan().any()}")
-            # print(f"Lin0 weight grad: {self.modules.enc.linear_0.w.weight.grad.isnan().any()}")
-            # print(f"Lin0 bias grad: {self.modules.enc.linear_0.w.bias.grad.isnan().any()}")
-            # print(f"self.grad_accumulation_factor: {self.grad_accumulation_factor}")
-            # print(f"loss: {loss}, {loss.type()}")
-            # print(f"batch tokens: {batch.tokens}")
-            # print(self.modules)
-            # for name, param in self.modules.enc.named_parameters():
-            #     # print("Model Parameters",name, torch.isfinite(param.grad).all())
-            #     print("Model Parameters",name, param.grad.isnan().any())
+
+            # # check for unused params
+            # for name, param in self.modules.wav2vec2.named_parameters():
+            #     if param.grad is None:
+            #         print(name)
             # exit()
+
             if should_step:
                 if self.check_gradients(loss):
                     self.wav2vec_optimizer.step()
@@ -274,7 +269,7 @@ class ASR(sb.Brain):
         # Run this *after* starting all processes since jit modules cannot be
         # pickled.
         self._compile_jit()
-
+        # exit()
         # Wrap modules with parallel backend after jit
         self._wrap_distributed()
 
@@ -287,88 +282,19 @@ class ASR(sb.Brain):
                 device=torch.device(self.device)
             )
 
-        # print("check model")
-        # print(f"STATE w2v optimizer: {self.wav2vec_optimizer}")
-        # print(f"STATE w2v optimizer: {props(self.wav2vec_optimizer)}")
-        # print(f"STATE w2v optimizer: {self.wav2vec_optimizer.param_groups[0]['lr']}")
-        # print(f"STATE w2v optimizer: {self.wav2vec_optimizer.state['lr']} | optimizer: {self.model_optimizer.state['lr']}")
-        # Change learning rate to hparam setting
-        sb.nnet.schedulers.update_learning_rate(
-            self.model_optimizer, self.model_optimizer.defaults['lr']
-        )
-        sb.nnet.schedulers.update_learning_rate(
-            self.wav2vec_optimizer, self.wav2vec_optimizer.defaults['lr']
-        )
+        ## Load parameters from cfg
+        # # Change learning rate to hparam setting
+        # sb.nnet.schedulers.update_learning_rate(
+        #     self.model_optimizer, self.model_optimizer.defaults['lr']
+        # )
+        # sb.nnet.schedulers.update_learning_rate(
+        #     self.wav2vec_optimizer, self.wav2vec_optimizer.defaults['lr']
+        # )
 
-        self.hparams.lr_annealing_model.hyperparam_value = self.model_optimizer.defaults['lr']
-        self.hparams.lr_annealing_wav2vec.hyperparam_value = self.wav2vec_optimizer.defaults['lr']
-        # print(f"DEFAULT w2v optimizer: {self.wav2vec_optimizer} | optimizer: {self.model_optimizer}")
-        # exit()
-
-    def _fit_train(self, train_set, epoch, enable):
-        # Training stage
-        self.on_stage_start(sb.Stage.TRAIN, epoch)
-        self.modules.train()
-
-        # Reset nonfinite count to 0 each epoch
-        self.nonfinite_count = 0
-
-        if self.train_sampler is not None and hasattr(
-            self.train_sampler, "set_epoch"
-        ):
-            self.train_sampler.set_epoch(epoch)
-
-        # Time since last intra-epoch checkpoint
-        last_ckpt_time = time.time()
-
-        with tqdm(
-            train_set,
-            initial=self.step,
-            dynamic_ncols=True,
-            disable=not enable,
-        ) as t:
-
-            for batch in t:
-                if self._optimizer_step_limit_exceeded:
-                    logger.info("Train iteration limit exceeded")
-                    break
-                self.step += 1
-                loss = self.fit_batch(batch)
-
-                self.avg_train_loss = self.update_average(
-                    loss, self.avg_train_loss
-                )
-                t.set_postfix(train_loss=self.avg_train_loss)
-
-                # Profile only if desired (steps allow the profiler to know when all is warmed up)
-                if self.profiler is not None:
-                    if self.profiler.record_steps:
-                        self.profiler.step()
-
-                # Debug mode only runs a few batches
-                if self.debug and self.step == self.debug_batches:
-                    break
-
-                if (
-                    self.checkpointer is not None
-                    and self.ckpt_interval_minutes > 0
-                    and time.time() - last_ckpt_time
-                    >= self.ckpt_interval_minutes * 60.0
-                ):
-                    # This should not use run_on_main, because that
-                    # includes a DDP barrier. That eventually leads to a
-                    # crash when the processes'
-                    # time.time() - last_ckpt_time differ and some
-                    # processes enter this block while others don't,
-                    # missing the barrier.
-                    if sb.utils.distributed.if_main_process():
-                        self._save_intra_epoch_ckpt()
-                    last_ckpt_time = time.time()
-
-        # Run train "on_stage_end" on all processes
-        self.on_stage_end(sb.Stage.TRAIN, self.avg_train_loss, epoch)
-        self.avg_train_loss = 0.0
-        self.step = 0
+        # self.hparams.lr_annealing_model.hyperparam_value = self.model_optimizer.defaults['lr']
+        # self.hparams.lr_annealing_wav2vec.hyperparam_value = self.wav2vec_optimizer.defaults['lr']
+        # # print(f"DEFAULT w2v optimizer: {self.wav2vec_optimizer} | optimizer: {self.model_optimizer}")
+        # # exit()
 
 def dataio_prepare(hparams):
     """This function prepares the datasets to be used in the brain class.
@@ -534,6 +460,8 @@ def prep_exp_dir(hparams):
 if __name__ == "__main__":
     # CLI:
     hparams_file, run_opts, overrides = sb.parse_arguments(sys.argv[1:])
+    print(f"run_opts: {run_opts}")
+    # exit()
 
     # If distributed_launch=True then
     # create ddp_group with the right communication protocol
@@ -552,6 +480,7 @@ if __name__ == "__main__":
 
     prep_exp_dir(hparams)
 
+
     # here we create the datasets objects as well as tokenization and encoding
     train_data, valid_data, test_data, label_encoder = dataio_prepare(
         hparams
@@ -565,6 +494,12 @@ if __name__ == "__main__":
         run_opts=run_opts,
         checkpointer=hparams["checkpointer"],
     )
+
+
+    # # We load the pretrained wav2vec2 model
+    # if "pretrainer" in hparams.keys():
+    #     run_on_main(hparams["pretrainer"].collect_files)
+    #     hparams["pretrainer"].load_collected(asr_brain.device)
 
     # We dynamicaly add the tokenizer to our brain class.
     # NB: This tokenizer corresponds to the one used for the LM!!
