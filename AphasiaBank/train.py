@@ -572,7 +572,6 @@ if __name__ == "__main__":
     asr_brain.tokenizer = label_encoder
     print(f"tokenizer: {asr_brain.tokenizer.lab2ind}")
     print(f"tokenizer: {len(asr_brain.tokenizer.lab2ind.keys())}")
-    exit()
     
     # asr_brain.modules = asr_brain.modules.float()
     count_parameters(asr_brain.modules)
