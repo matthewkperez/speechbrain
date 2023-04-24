@@ -10,26 +10,27 @@ lr: 0.9
 lr_wav2vec: 0.0000008
 number_of_epochs: 100
 # w2v_model: wav2vec2-large-xlsr-53
-# w2v_model: wav2vec2-large-960h-lv60-self
+w2v_model: wav2vec2-large-960h-lv60-self
 # w2v_model: hubert-large-ls960-ft
 # w2v_model: whisper-large-v2
-w2v_model: wavlm-large
-freeze_wav2vec: False
+# w2v_model: wavlm-large
+# URL for the biggest Fairseq english wav2vec2 model.
+wav2vec2_hub: !ref facebook/<w2v_model>
+# wav2vec2_hub: !ref openai/<w2v_model>
+# wav2vec2_hub: !ref microsoft/<w2v_model>
+
+freeze_wav2vec: True
 freeze_feature_extractor_wav2vec: True # procs when freeze_wav2vec = False, only retrain transformers
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
-output_folder: !ref results/duc_process_ES/No-LM/<w2v_model>-mtl_paraphasia/freeze-<freeze_wav2vec>
+output_folder: !ref results/no_paraphasia/<w2v_model>/freeze-<freeze_wav2vec>
 wer_file: !ref <output_folder>/wer.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
-data_dir: /z/mkperez/speechbrain/AphasiaBank/data/Duc_process
-# data_dir: /z/mkperez/speechbrain/AphasiaBank/data/Duc_process/mtl_paraphasia
+# data_dir: /z/mkperez/speechbrain/AphasiaBank/data/Duc_process
+data_dir: /z/mkperez/speechbrain/AphasiaBank/data/no_paraphasia/mtl_paraphasia
 data_folder: !ref <data_dir>
 mtl_flag: False
 
-# URL for the biggest Fairseq english wav2vec2 model.
-# wav2vec2_hub: !ref facebook/<w2v_model>
-# wav2vec2_hub: !ref openai/<w2v_model>
-wav2vec2_hub: !ref microsoft/<w2v_model>
 
 # Data files
 train_splits: ["train"]
@@ -41,15 +42,19 @@ train_csv: !ref <data_dir>/train.csv
 valid_csv: !ref <data_dir>/dev.csv
 test_csv: !ref <data_dir>/test.csv
 
+# Ngram LM
+use_language_modelling: True
+ngram_lm_path: /z/mkperez/AphasiaBank/kd_updated_para/Aphasia+Control/lang-3-gram_lower/G.arpa
+
 # Training parameters
-sorting: ascending
+sorting: descending
 auto_mix_prec: False
 sample_rate: 16000
 max_length: 10 # change to 20
 min_length: 0.5
 max_sev_train: 4
 min_sev_train: -1
-batch_size: 3 # 32,3
+batch_size: 16 # 32,3
 test_batch_size: 1 # 32,3
 grad_accumulation_factor: 16 #4,16
 
@@ -79,7 +84,7 @@ blank_index: 0
 #
 epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
    limit: !ref <number_of_epochs>
-   limit_to_stop: 3
+   limit_to_stop: 5
    limit_warmup: 5
    direction: "min"
 
