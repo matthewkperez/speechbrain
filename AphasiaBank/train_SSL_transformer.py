@@ -131,8 +131,9 @@ class ASR(sb.Brain):
                 # for the sake of efficiency, we only perform beamsearch with limited capacity
                 # and no LM to give user some idea of how the AM is doing
                 hyps, _ = self.hparams.valid_search(w2v_out.detach(), wav_lens)
-        elif stage == sb.Stage.TEST:
+        elif stage == sb.Stage.TEST and not self.hparams.use_language_modelling:
             hyps, _ = self.hparams.test_search(w2v_out.detach(), wav_lens)
+            
 
         return p_ctc, p_seq, wav_lens, hyps, dec_mha
 
@@ -174,12 +175,24 @@ class ASR(sb.Brain):
             if current_epoch % valid_search_interval == 0 or current_epoch==1 or (
                 stage == sb.Stage.TEST
             ):
-                # Decode token terms to words
-                predicted_words = [
-                    self.tokenizer.decode_ids(utt_seq).split(" ") for utt_seq in hyps
-                ]
+                if stage == sb.Stage.TEST and self.hparams.use_language_modelling:
+                    predicted_words = []
+                    for logs in p_seq:
+                        text = self.decoder.decode(logs.detach().cpu().numpy(), beam_width=100)
+                        predicted_words.append(text.split(" "))
+                else:
+                    # Decode token terms to words
+                    predicted_words = [
+                        self.tokenizer.decode_ids(utt_seq).split(" ") for utt_seq in hyps
+                    ]
+
+
+
                 # target_words = [wrd.upper().split(" ") for wrd in batch.wrd] # for libri
                 target_words = [wrd.split(" ") for wrd in batch.wrd] # AB
+                # print(f"predicted: {predicted_words}")
+                # print(f"target_words: {target_words}")
+                # exit()
                 self.wer_metric.append(ids, predicted_words, target_words)
                 self.cer_metric.append(ids, predicted_words, target_words)
 
@@ -204,7 +217,7 @@ class ASR(sb.Brain):
 
     def on_stage_start(self, stage, epoch):
         """Gets called at the beginning of each epoch"""
-        print(f"LR: {self.optimizer.param_groups[-1]['lr']}")
+        # print(f"LR: {self.optimizer.param_groups[-1]['lr']}")
         if stage != sb.Stage.TRAIN:
             self.cer_metric = self.hparams.cer_computer()
             self.wer_metric = self.hparams.error_rate_computer()
@@ -402,7 +415,8 @@ def dataio_prepare(hparams,tokenizer):
         return sig
 
     sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)
-
+    label_encoder = sb.dataio.encoder.CTCTextEncoder()
+    
     # 3. Define text pipeline:
     @sb.utils.data_pipeline.takes("wrd")
     @sb.utils.data_pipeline.provides(
@@ -508,15 +522,57 @@ if __name__ == "__main__":
     # asr_brain.modules = asr_brain.modules.float()
     count_parameters(asr_brain.modules)
 
-    with torch.autograd.detect_anomaly():
-        asr_brain.fit(
-            asr_brain.hparams.epoch_counter,
-            train_data,
-            valid_data,
-            train_loader_kwargs=hparams["train_dataloader_opts"],
-            valid_loader_kwargs=hparams["valid_dataloader_opts"],
-        )
 
+    # Loading the labels for the LM decoding and the CTC decoder
+    if "use_language_modelling" in hparams:
+        if hparams["use_language_modelling"]:
+            try:
+                from pyctcdecode import build_ctcdecoder
+            except ImportError:
+                err_msg = "Optional dependencies must be installed to use pyctcdecode.\n"
+                err_msg += "Install using `pip install kenlm pyctcdecode`.\n"
+                raise ImportError(err_msg)
+
+            # ind2lab = label_encoder.ind2lab
+            # labels = [ind2lab[x] for x in range(len(ind2lab))]
+            # labels = [""] + labels[
+            #     1:
+            # ]  # Replace the <blank> token with a blank character, needed for PyCTCdecode
+
+            labels  = [asr_brain.tokenizer.id_to_piece(id).lower() for id in range(asr_brain.tokenizer.get_piece_size())]
+            # print(f"labels: {labels}")
+            # labels[10]=' ' # '_'
+            # labels[0] = '<pad>' # unk
+
+
+            labels[0] = '' # unk
+            # print(f"labels: {labels}")
+            # exit()
+
+            asr_brain.decoder = build_ctcdecoder(
+                labels,
+                kenlm_model_path=hparams[
+                    "ngram_lm_path"
+                ],  # either .arpa or .bin file
+                alpha=0.5,  # Default by KenLM
+                beta=1.0,  # Default by KenLM
+            )
+    else:
+        hparams["use_language_modelling"] = False
+    
+
+    with torch.autograd.detect_anomaly():
+        if hparams['train_flag']:
+            asr_brain.fit(
+                asr_brain.hparams.epoch_counter,
+                train_data,
+                valid_data,
+                train_loader_kwargs=hparams["train_dataloader_opts"],
+                valid_loader_kwargs=hparams["valid_dataloader_opts"],
+            )
+        
+    # exit()
+    print("\nEVALUATE\n")
     # Testing
     asr_brain.hparams.wer_file = os.path.join(
         hparams["output_folder"], "wer.txt"
