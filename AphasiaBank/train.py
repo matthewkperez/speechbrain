@@ -544,7 +544,6 @@ if __name__ == "__main__":
     print(f"tokenizer: {asr_brain.tokenizer.lab2ind}")
     print(f"tokenizer: {len(asr_brain.tokenizer.lab2ind.keys())}")
 
-
     # Loading the labels for the LM decoding and the CTC decoder
     if "use_language_modelling" in hparams:
         if hparams["use_language_modelling"]:
