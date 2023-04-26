@@ -400,38 +400,18 @@ def dataio_prepare(hparams):
     # print(train_data.data)
     # exit()
     if hparams["sorting"] == "ascending":
-        if 'tr_speaker' in hparams:
-            # print(train_data.data['kansas12a-59'])
-            # create numeric speaker_id
-            print(f"hparams: {hparams['tr_speaker']}")
-            tr_speaker_int = int(re.findall(r'\d+', hparams["tr_speaker"])[0])
-            train_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in train_data.data.items()}
-            # we sort training data to speed up training and get better results.
-            train_data = train_data.filtered_sorted(sort_key="duration",
-                key_max_value={"duration": hparams["max_length"], 
-                    "severity_cat": hparams["max_sev_train"],
-                    "spk_id": tr_speaker_int
-                },
-                key_min_value={"duration": hparams["min_length"], 
-                    "severity_cat": hparams["min_sev_train"],
-                    "spk_id": tr_speaker_int
-                },
-            )
-
-        else:
-            # we sort training data to speed up training and get better results.
-            train_data = train_data.filtered_sorted(sort_key="duration",
-                key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
-                key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
-
-            )
-
+        # we sort training data to speed up training and get better results.
+        train_data = train_data.filtered_sorted(sort_key="duration",
+            key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
+            key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
+        )
         # when sorting do not shuffle in dataloader ! otherwise is pointless
         hparams["train_dataloader_opts"]["shuffle"] = False
     elif hparams["sorting"] == "descending":
         train_data = train_data.filtered_sorted(
             sort_key="duration", reverse=True,
-            # key_max_value={"duration": hparams["max_length"]}
+            key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
+            key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
         )
         # when sorting do not shuffle in dataloader ! otherwise is pointless
         hparams["train_dataloader_opts"]["shuffle"] = False
@@ -446,42 +426,18 @@ def dataio_prepare(hparams):
     valid_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["valid_csv"], replacements={"data_root": data_folder}
     )
-    if 'tr_speaker' in hparams:
-        valid_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in valid_data.data.items()}
-        # we sort training data to speed up training and get better results.
-        valid_data = valid_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"], 
-                "spk_id": tr_speaker_int
-            },
-            key_min_value={"duration": hparams["min_length"], 
-                "spk_id": tr_speaker_int
-            },
-        )
-    else:
-        valid_data = valid_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"]},
-            key_min_value={"duration": hparams["min_length"]}
-        )
+    valid_data = valid_data.filtered_sorted(sort_key="duration",
+        key_max_value={"duration": hparams["max_length"]},
+        key_min_value={"duration": hparams["min_length"]}
+    )
 
     test_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["test_csv"], replacements={"data_root": data_folder}
     )
-    if 'tr_speaker' in hparams:
-        test_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in test_data.data.items()}
-        # we sort training data to speed up training and get better results.
-        test_data = test_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"], 
-                "spk_id": tr_speaker_int
-            },
-            key_min_value={"duration": hparams["min_length"], 
-                "spk_id": tr_speaker_int
-            },
-        )
-    else:
-        test_data = test_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"]},
-            key_min_value={"duration": hparams["min_length"]}
-        )
+    test_data = test_data.filtered_sorted(sort_key="duration",
+        key_max_value={"duration": hparams["max_length"]},
+        key_min_value={"duration": hparams["min_length"]}
+    )
 
     datasets = [train_data, valid_data, test_data]
 

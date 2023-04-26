@@ -10,13 +10,13 @@ lr: 0.9
 lr_wav2vec: 0.0000008
 number_of_epochs: 100
 # w2v_model: wav2vec2-large-xlsr-53
-w2v_model: wav2vec2-large-960h-lv60-self
+# w2v_model: wav2vec2-large-960h-lv60-self
 # w2v_model: hubert-large-ls960-ft
-# w2v_model: whisper-large-v2
+w2v_model: whisper-large-v2
 # w2v_model: wavlm-large
 # URL for the biggest Fairseq english wav2vec2 model.
-wav2vec2_hub: !ref facebook/<w2v_model>
-# wav2vec2_hub: !ref openai/<w2v_model>
+# wav2vec2_hub: !ref facebook/<w2v_model>
+wav2vec2_hub: !ref openai/<w2v_model>
 # wav2vec2_hub: !ref microsoft/<w2v_model>
 
 freeze_wav2vec: True
