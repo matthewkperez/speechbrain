@@ -487,6 +487,10 @@ if __name__ == "__main__":
         annotation_read="wrd",
         model_type=hparams["token_type"],
         character_coverage=1.0,
+        bos_id=hparams["bos_index"],
+        eos_id=hparams["eos_index"],
+        pad_id=hparams["pad_index"],
+        unk_id=hparams["unk_index"],
     )
 
 
@@ -515,7 +519,7 @@ if __name__ == "__main__":
     train_dataloader_opts = hparams["train_dataloader_opts"]
     valid_dataloader_opts = hparams["valid_dataloader_opts"]
     tokens = {i:asr_brain.tokenizer.id_to_piece(i) for i in range(asr_brain.tokenizer.get_piece_size())}
-    print(f"tokenizer: {tokens}")
+    print(f"tokenizer: {tokens} | {len(tokens.keys())}")
     # print(f"train_data: {train_data.data}")
     # exit()
     

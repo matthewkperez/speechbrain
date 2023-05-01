@@ -13,13 +13,14 @@ __set_seed: !apply:torch.manual_seed [!ref <seed>]
 w2v_model: hubert-large-ls960-ft
 wav2vec2_hub: !ref facebook/<w2v_model>
 
-output_folder: !ref results/no_paraphasia/S2S/<w2v_model>-Transformer/1k-unigram-newBob-1e-4
+output_folder: !ref results/no_paraphasia/S2S/<w2v_model>-Transformer/31-char-newBob-1e-4
 wer_file: !ref <output_folder>/wer.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
 # data_dir: /z/mkperez/speechbrain/AphasiaBank/data/no_paraphasia/mtl_paraphasia
 data_dir: /z/mkperez/speechbrain/AphasiaBank/data/no_paraphasia/attn_viz
 data_folder: !ref <data_dir>
+train_flag: True
 
 # stages related parameters
 lr_adam: 1.0e-4
@@ -46,7 +47,7 @@ min_sev_train: -1
 # The global batch size is computed as batch_size * n_gpus * gradient_accumulation.
 # Empirically, we found that this value should be >= 128.
 # Please, set your parameters accordingly.
-number_of_epochs: 100
+number_of_epochs: 50
 batch_size: 10 # This works for 1x GPU with 40GB with no dynamic batching
 ctc_weight: 0.3
 grad_accumulation_factor: 4
@@ -86,9 +87,13 @@ sample_rate: 16000
 n_fft: 400
 n_mels: 80
 
+# Ngram LM
+use_language_modelling: True
+ngram_lm_path: /z/mkperez/AphasiaBank/kd_updated_para/Aphasia+Control/lang-3-gram_lower/G.arpa
+
 
 #SP
-token_type: "unigram"
+token_type: "char"
 ####################### Model parameters ###########################
 # Transformer
 d_model: 1024
@@ -98,7 +103,7 @@ num_decoder_layers: 6
 d_ffn: 2048
 transformer_dropout: 0.1
 activation: !name:torch.nn.GELU
-output_neurons: 1000
+output_neurons: 31
 
 # Outputs
 blank_index: 0
@@ -106,6 +111,7 @@ label_smoothing: 0.0
 pad_index: 0
 bos_index: 1
 eos_index: 2
+unk_index: 3
 
 # Decoding parameters
 min_decode_ratio: 0.0
@@ -254,14 +260,14 @@ checkpointer: !new:speechbrain.utils.checkpoints.Checkpointer
         normalizer: !ref <normalize>
         counter: !ref <epoch_counter>
 
-# epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
-#    limit: !ref <number_of_epochs>
-
-epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
+epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
    limit: !ref <number_of_epochs>
-   limit_to_stop: 7
-   limit_warmup: 5
-   direction: "min"
+
+# epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounterWithStopper
+#    limit: !ref <number_of_epochs>
+#    limit_to_stop: 7
+#    limit_warmup: 5
+#    direction: "min"
 
 
 augmentation: !new:speechbrain.lobes.augment.TimeDomainSpecAugment
