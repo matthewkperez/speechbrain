@@ -14,7 +14,6 @@ train_flag: True
 use_language_modelling: True
 ngram_lm_path: /z/mkperez/AphasiaBank/kd_updated_para/Aphasia+Control/lang-3-gram_lower/G.arpa
 
-
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
 # w2v_model: hubert-large-ls960-ft
 # wav2vec2_hub: !ref facebook/<w2v_model>
@@ -29,7 +28,6 @@ train_log: !ref <output_folder>/train_log.txt
 # data_dir: /z/mkperez/speechbrain/AphasiaBank/data/no_paraphasia/mtl_paraphasia
 data_dir: /z/mkperez/speechbrain/AphasiaBank/data/no_paraphasia/attn_viz
 data_folder: !ref <data_dir>
-train_flag: True
 
 # stages related parameters
 lr_adam: 1.0e-4
@@ -95,10 +93,6 @@ dynamic_batch_sampler:
 sample_rate: 16000
 n_fft: 400
 n_mels: 80
-
-# Ngram LM
-use_language_modelling: True
-ngram_lm_path: /z/mkperez/AphasiaBank/kd_updated_para/Aphasia+Control/lang-3-gram_lower/G.arpa
 
 
 

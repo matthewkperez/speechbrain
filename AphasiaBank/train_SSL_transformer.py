@@ -179,37 +179,23 @@ class ASR(sb.Brain):
                     predicted_words = []
                     for logs in p_seq:
                         text = self.decoder.decode(logs.detach().cpu().numpy(), beam_width=100)
+                        # remove eos
+                        eos_idx = text.find("</s>")
+                        text = text[:eos_idx]
                         predicted_words.append(text.split(" "))
                 else:
-                    # Decode token terms to words
+                    # Decode token terms to words Sentencepiece
                     predicted_words = [
-                        "".join(self.tokenizer.decode_ndim(utt_seq)).split(" ")
-                        for utt_seq in hyps
+                        self.tokenizer.decode_ids(utt_seq).split(" ") for utt_seq in hyps
                     ]
 
-
-
-                # target_words = [wrd.upper().split(" ") for wrd in batch.wrd] # for libri
                 target_words = [wrd.split(" ") for wrd in batch.wrd] # AB
-                # print(f"predicted: {predicted_words}")
-                # print(f"target_words: {target_words}")
-                # exit()
                 self.wer_metric.append(ids, predicted_words, target_words)
                 self.cer_metric.append(ids, predicted_words, target_words)
 
                 # visualize attention
                 if self.hparams.val_attn_ids and (ids[0] in self.hparams.val_attn_ids):
-                # if ids[0] in self.hparams.val_attn_ids:
-                    # tick_labels = [self.tokenizer.id_to_piece(i.item()) for i in tokens_eos[0]]
-                    char_decode = [self.tokenizer.decode_ndim(i.item()) for i in tokens_eos[0]]
-                    add_space = []
-                    for i in range(len(char_decode)-1):
-                        if char_decode[i] == '<blank>' and char_decode[i+1] == '<blank>':
-                            add_space.append(" ")
-                        add_space.append(char_decode[i])
-                    tick_labels = "".join(add_space).split(" ")
-
-                    tick_labels = "".join([self.tokenizer.decode_ndim(i.item()) for i in tokens_eos[0]]).split(" ")
+                    tick_labels = [self.tokenizer.id_to_piece(i.item()) for i in tokens_eos[0]]
                     visualize_attention(dec_attn,f"{ids[0]}",tick_labels,self.hparams.output_folder,word_x=True,epoch=current_epoch)
 
 
@@ -338,7 +324,7 @@ class ASR(sb.Brain):
         self.on_fit_batch_end(batch, outputs, loss, should_step)
         return loss.detach().cpu()
 
-def dataio_prepare(hparams):
+def dataio_prepare(hparams,tokenizer):
     """This function prepares the datasets to be used in the brain class.
     It also defines the data processing pipeline through user-defined functions."""
     data_folder = hparams["data_folder"]
@@ -396,8 +382,6 @@ def dataio_prepare(hparams):
     datasets = [train_data, valid_data, test_data]
     valtest_datasets = [valid_data,test_data]
 
-    # tokenizer = hparams["tokenizer"]
-
     # 2. Define audio pipeline:
     @sb.utils.data_pipeline.takes("wav")
     @sb.utils.data_pipeline.provides("sig")
@@ -425,18 +409,15 @@ def dataio_prepare(hparams):
         return sig
 
     sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)
-    label_encoder = sb.dataio.encoder.CTCTextEncoder()
-    
+
     # 3. Define text pipeline:
     @sb.utils.data_pipeline.takes("wrd")
     @sb.utils.data_pipeline.provides(
-        "wrd", "char_list", "tokens_list", "tokens_bos", "tokens_eos", "tokens"
+        "wrd", "tokens_list", "tokens_bos", "tokens_eos", "tokens"
     )
     def text_pipeline(wrd):
         yield wrd
-        char_list = list(wrd)
-        yield char_list
-        tokens_list = label_encoder.encode_sequence(char_list)
+        tokens_list = tokenizer.sp.encode_as_ids(wrd)
         yield tokens_list
         tokens_bos = torch.LongTensor([hparams["bos_index"]] + (tokens_list))
         yield tokens_bos
@@ -444,35 +425,18 @@ def dataio_prepare(hparams):
         yield tokens_eos
         tokens = torch.LongTensor(tokens_list)
         yield tokens
-
     sb.dataio.dataset.add_dynamic_item(datasets, text_pipeline)
-
-    lab_enc_file = os.path.join(hparams["save_folder"], "label_encoder.txt")
-    # add special labels
-    special_labels = {
-        "blank_label": hparams["blank_index"],
-        "bos_label": hparams["bos_index"],
-        "eos_label": hparams["eos_index"]
-    }
-    label_encoder.load_or_create(
-        path=lab_enc_file,
-        from_didatasets=[train_data],
-        output_key="char_list",
-        special_labels=special_labels,
-        sequence_input=True,
-    )
 
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        datasets, ["id", "sig", "wrd","char_list", "tokens_bos", "tokens_eos", "tokens"],
+        datasets, ["id", "sig", "wrd", "tokens_bos", "tokens_eos", "tokens"],
     )
 
 
     return (
         train_data,
         valid_data,
-        test_data,
-        label_encoder
+        test_data
     )
 
 
@@ -521,7 +485,7 @@ if __name__ == "__main__":
     )
 
 
-    train_data,valid_data,test_data,label_encoder = dataio_prepare(hparams)
+    train_data,valid_data,test_data = dataio_prepare(hparams,tokenizer)
 
     # # We download the pretrained LM from HuggingFace (or elsewhere depending on
     # # the path given in the YAML file). The tokenizer is loaded at the same time.
@@ -537,7 +501,7 @@ if __name__ == "__main__":
         checkpointer=hparams["checkpointer"],
     )
 
-
+    asr_brain.tokenizer = tokenizer.sp
     train_dataloader_opts = hparams["train_dataloader_opts"]
     valid_dataloader_opts = hparams["valid_dataloader_opts"]
     tokens = {i:asr_brain.tokenizer.id_to_piece(i) for i in range(asr_brain.tokenizer.get_piece_size())}
@@ -560,25 +524,17 @@ if __name__ == "__main__":
                 err_msg += "Install using `pip install kenlm pyctcdecode`.\n"
                 raise ImportError(err_msg)
 
-            ind2lab = label_encoder.ind2lab
-            labels = [ind2lab[x] for x in range(len(ind2lab))]
-            labels = [""] + labels[1:]  # Replace the <blank> token with a blank character, needed for PyCTCdecode
-
-            # labels  = [asr_brain.tokenizer.id_to_piece(id).lower() for id in range(asr_brain.tokenizer.get_piece_size())]
-            # print(f"labels: {labels}")
-            # labels[10]=' ' # '_'
-            # labels[0] = '<pad>' # unk
-
-
-            # labels[0] = '' # unk
-            # print(f"labels: {labels}")
-            # exit()
+            labels  = [asr_brain.tokenizer.id_to_piece(id).lower() for id in range(asr_brain.tokenizer.get_piece_size())]
+            print(f"labels: {labels[:16]}")
+            # replace_dict = {'<unk>':'<pad>', '▁':' '}
+            # replace_dict = {'<unk>':'<pad>'}
+            replace_dict = {'<unk>':''}
+            labels = [replace_dict[l] if l in replace_dict else l for l in labels]
+            print(f"labels: {labels[:16]}")
 
             asr_brain.decoder = build_ctcdecoder(
                 labels,
-                kenlm_model_path=hparams[
-                    "ngram_lm_path"
-                ],  # either .arpa or .bin file
+                kenlm_model_path=hparams["ngram_lm_path"],  # either .arpa or .bin file
                 alpha=0.5,  # Default by KenLM
                 beta=1.0,  # Default by KenLM
             )
