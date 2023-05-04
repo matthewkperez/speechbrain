@@ -568,8 +568,8 @@ class Brain:
             self.scaler = torch.cuda.amp.GradScaler()
 
             # only add scaler recoverable if present
-            # if self.checkpointer is not None:
-                # self.checkpointer.add_recoverable("scaler", self.scaler)
+            if self.checkpointer is not None:
+                self.checkpointer.add_recoverable("scaler", self.scaler)
 
         # List parameter count for the user
         total_params = sum(
@@ -1206,9 +1206,10 @@ class Brain:
         enable = progressbar and sb.utils.distributed.if_main_process()
 
         # epoch_counter (load from checkpoint)
-        if epoch_counter.should_stop(current=epoch_counter.current,current_metric=float('inf')):
-            epoch_counter.current = epoch_counter.limit  # skipping unpromising epochs, set curr_epoch to last epoch
-            print("early stopping proc")
+        if isinstance(epoch_counter, sb.utils.epoch_loop.EpochCounterWithStopper):
+            if epoch_counter.should_stop(current=epoch_counter.current,current_metric=float('inf')):
+                epoch_counter.current = epoch_counter.limit  # skipping unpromising epochs, set curr_epoch to last epoch
+                print("early stopping proc")
 
         # Iterate epochs
         for epoch in epoch_counter:
@@ -1216,9 +1217,10 @@ class Brain:
             self._fit_valid(valid_set=valid_set, epoch=epoch, enable=enable)
 
             # epoch_counter
-            if epoch_counter.should_stop(current=epoch,current_metric=self.valid_loss):
-                epoch_counter.current = epoch_counter.limit  # skipping unpromising epochs, set curr_epoch to last epoch
-                print("early stopping proc")
+            if isinstance(epoch_counter, sb.utils.epoch_loop.EpochCounterWithStopper):
+                if epoch_counter.should_stop(current=epoch,current_metric=self.valid_loss):
+                    epoch_counter.current = epoch_counter.limit  # skipping unpromising epochs, set curr_epoch to last epoch
+                    print("early stopping proc")
 
             # Debug mode only runs a few epochs
             if (
@@ -1227,6 +1229,7 @@ class Brain:
                 or self._optimizer_step_limit_exceeded
             ):
                 break
+        print("done training")
 
     @property
     def _optimizer_step_limit_exceeded(self):
