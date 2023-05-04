@@ -121,12 +121,28 @@ class ASR(sb.Brain):
         # else:
         loss = loss_ctc
 
-        if stage != sb.Stage.TRAIN:
+        if stage == sb.Stage.VALID:
             # Decode token terms to words
             predicted_words = [
                 "".join(self.tokenizer.decode_ndim(utt_seq)).split(" ")
                 for utt_seq in predicted_tokens
             ]
+            target_words = [wrd.split(" ") for wrd in batch.wrd]
+            self.wer_metric.append(ids, predicted_words, target_words)
+            self.cer_metric.append(ids, predicted_words, target_words)
+
+        elif stage == sb.Stage.TEST:  # Language model decoding only used for test
+            if self.hparams.use_language_modelling:
+                predicted_words = []
+                for logs in p_ctc:
+                    text = self.decoder.decode(logs.detach().cpu().numpy())
+                    predicted_words.append(text.split(" "))
+            else:
+                predicted_words = [
+                    "".join(self.tokenizer.decode_ndim(utt_seq)).split(" ")
+                    for utt_seq in predicted_tokens
+                ]
+                
             target_words = [wrd.split(" ") for wrd in batch.wrd]
             self.wer_metric.append(ids, predicted_words, target_words)
             self.cer_metric.append(ids, predicted_words, target_words)
@@ -310,38 +326,18 @@ def dataio_prepare(hparams):
     # print(train_data.data)
     # exit()
     if hparams["sorting"] == "ascending":
-        if 'tr_speaker' in hparams:
-            # print(train_data.data['kansas12a-59'])
-            # create numeric speaker_id
-            print(f"hparams: {hparams['tr_speaker']}")
-            tr_speaker_int = int(re.findall(r'\d+', hparams["tr_speaker"])[0])
-            train_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in train_data.data.items()}
-            # we sort training data to speed up training and get better results.
-            train_data = train_data.filtered_sorted(sort_key="duration",
-                key_max_value={"duration": hparams["max_length"], 
-                    "severity_cat": hparams["max_sev_train"],
-                    "spk_id": tr_speaker_int
-                },
-                key_min_value={"duration": hparams["min_length"], 
-                    "severity_cat": hparams["min_sev_train"],
-                    "spk_id": tr_speaker_int
-                },
-            )
-
-        else:
-            # we sort training data to speed up training and get better results.
-            train_data = train_data.filtered_sorted(sort_key="duration",
-                key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
-                key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
-
-            )
-
+        # we sort training data to speed up training and get better results.
+        train_data = train_data.filtered_sorted(sort_key="duration",
+            key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
+            key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
+        )
         # when sorting do not shuffle in dataloader ! otherwise is pointless
         hparams["train_dataloader_opts"]["shuffle"] = False
     elif hparams["sorting"] == "descending":
         train_data = train_data.filtered_sorted(
             sort_key="duration", reverse=True,
-            # key_max_value={"duration": hparams["max_length"]}
+            key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
+            key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
         )
         # when sorting do not shuffle in dataloader ! otherwise is pointless
         hparams["train_dataloader_opts"]["shuffle"] = False
@@ -356,42 +352,18 @@ def dataio_prepare(hparams):
     valid_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["valid_csv"], replacements={"data_root": data_folder}
     )
-    if 'tr_speaker' in hparams:
-        valid_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in valid_data.data.items()}
-        # we sort training data to speed up training and get better results.
-        valid_data = valid_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"], 
-                "spk_id": tr_speaker_int
-            },
-            key_min_value={"duration": hparams["min_length"], 
-                "spk_id": tr_speaker_int
-            },
-        )
-    else:
-        valid_data = valid_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"]},
-            key_min_value={"duration": hparams["min_length"]}
-        )
+    valid_data = valid_data.filtered_sorted(sort_key="duration",
+        key_max_value={"duration": hparams["max_length"]},
+        key_min_value={"duration": hparams["min_length"]}
+    )
 
     test_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["test_csv"], replacements={"data_root": data_folder}
     )
-    if 'tr_speaker' in hparams:
-        test_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in test_data.data.items()}
-        # we sort training data to speed up training and get better results.
-        test_data = test_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"], 
-                "spk_id": tr_speaker_int
-            },
-            key_min_value={"duration": hparams["min_length"], 
-                "spk_id": tr_speaker_int
-            },
-        )
-    else:
-        test_data = test_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"]},
-            key_min_value={"duration": hparams["min_length"]}
-        )
+    test_data = test_data.filtered_sorted(sort_key="duration",
+        key_max_value={"duration": hparams["max_length"]},
+        key_min_value={"duration": hparams["min_length"]}
+    )
 
     datasets = [train_data, valid_data, test_data]
 
@@ -486,7 +458,6 @@ if __name__ == "__main__":
     train_data, valid_data, test_data, label_encoder = dataio_prepare(
         hparams
     )
-    # exit()
     
     # Trainer initialization
     asr_brain = ASR(
@@ -507,7 +478,33 @@ if __name__ == "__main__":
     asr_brain.tokenizer = label_encoder
     print(f"tokenizer: {asr_brain.tokenizer.lab2ind}")
     print(f"tokenizer: {len(asr_brain.tokenizer.lab2ind.keys())}")
-    exit()
+
+    # Loading the labels for the LM decoding and the CTC decoder
+    if "use_language_modelling" in hparams:
+        if hparams["use_language_modelling"]:
+            try:
+                from pyctcdecode import build_ctcdecoder
+            except ImportError:
+                err_msg = "Optional dependencies must be installed to use pyctcdecode.\n"
+                err_msg += "Install using `pip install kenlm pyctcdecode`.\n"
+                raise ImportError(err_msg)
+
+            ind2lab = label_encoder.ind2lab
+            labels = [ind2lab[x] for x in range(len(ind2lab))]
+            labels = [""] + labels[
+                1:
+            ]  # Replace the <blank> token with a blank character, needed for PyCTCdecode
+            asr_brain.decoder = build_ctcdecoder(
+                labels,
+                kenlm_model_path=hparams[
+                    "ngram_lm_path"
+                ],  # either .arpa or .bin file
+                alpha=0.5,  # Default by KenLM
+                beta=1.0,  # Default by KenLM
+            )
+    else:
+        hparams["use_language_modelling"] = False
+
     
     # asr_brain.modules = asr_brain.modules.float()
     count_parameters(asr_brain.modules)

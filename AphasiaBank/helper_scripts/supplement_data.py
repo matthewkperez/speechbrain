@@ -68,6 +68,7 @@ if __name__ == "__main__":
 
                     
                     if para_type=='multi':
+<<<<<<< HEAD
                         aug_para_wrds.append(" ".join([f"{word}/{para}" for word,para in zip(row['wrd'].split(), utt2wrd_label[row['ID']])]))
                     elif para_type == 'pn':
                         aug_para_wrds.append(" ".join([f"{word}/C" if para == 'c' else f"{word}/P" for word,para in zip(row['wrd'].split(), utt2wrd_label[row['ID']])]))
@@ -75,6 +76,15 @@ if __name__ == "__main__":
                         aug_para_wrds.append(" ".join([f"{word}/P" if para == 'p' else f"{word}/C" for word,para in zip(row['wrd'].split(), utt2wrd_label[row['ID']])]))
                     elif para_type == 'n':
                         aug_para_wrds.append(" ".join([f"{word}/P" if para == 'n' else f"{word}/C" for word,para in zip(row['wrd'].split(), utt2wrd_label[row['ID']])]))
+=======
+                        aug_para_wrds.append([f"{word}/{para}" for word,para in zip(row['wrd'].split(), utt2wrd_label[row['ID']])])
+                    elif para_type == 'pn':
+                        aug_para_wrds.append([f"{word}/{para}" if para == 'c' else f"{word}/pn" for word,para in zip(row['wrd'].split(), utt2wrd_label[row['ID']])])
+                    elif para_type == 'p':
+                        aug_para_wrds.append([f"{word}/{para}" if para == 'p' else f"{word}/c" for word,para in zip(row['wrd'].split(), utt2wrd_label[row['ID']])])
+                    elif para_type == 'n':
+                        aug_para_wrds.append([f"{word}/{para}" if para == 'n' else f"{word}/c" for word,para in zip(row['wrd'].split(), utt2wrd_label[row['ID']])])
+>>>>>>> 3d9e67ae4f17be6664a23d06732bbb88e0fe6093
 
 
             
@@ -91,6 +101,9 @@ if __name__ == "__main__":
 
             print(f"{stype}: {og_num_samples} -> {new_num_samples}")
             df.to_csv(f"{new_data_dir}/{stype}_{para_type}.csv")
+<<<<<<< HEAD
 
+=======
+>>>>>>> 3d9e67ae4f17be6664a23d06732bbb88e0fe6093
 
 
