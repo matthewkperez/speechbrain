@@ -357,7 +357,6 @@ class EncoderWrapper(nn.Module):
         x = self.transformer.encode(x, wav_lens)
         return x
 
-
 class TransformerDecoderASR(TransformerInterface):
     """
     Load pretrained SSL model to be used as encoder
@@ -612,4 +611,3 @@ class TransformerDecoderASR(TransformerInterface):
         for p in self.parameters():
             if p.dim() > 1:
                 torch.nn.init.xavier_normal_(p)
-
