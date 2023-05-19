@@ -1,11 +1,6 @@
 #!/usr/bin/env/python3
-"""Recipe for training a wav2vec-based ctc ASR system with librispeech.
-The system employs wav2vec as its encoder. Decoding is performed with
-ctc greedy decoder.
-To run this recipe, do the followering:
-> python train_with_wav2vec.py hparams/train_{hf,sb}_wav2vec.yaml
-The neural network is trained on CTC likelihood target and character units
-are used as basic recognition tokens.
+"""
+S2S with pretrained SSL encoder and GRU decoder
 
 Authors
  * Rudolf A Braun 2022
@@ -40,7 +35,6 @@ from datasets import load_dataset, load_metric, Audio
 import re
 import time
 from speechbrain.tokenizers.SentencePiece import SentencePiece
-from itertools import groupby
 
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -54,61 +48,6 @@ def props(cls):
     return [i for i in cls.__dict__.keys() if i[:1] != '_']
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-spk2aq = chaipy.io.dict_read("/z/mkperez/speechbrain/AphasiaBank/spk2aq")
-
-def visualize_attention(attn,str_attn,ticklabels,exp_dir,word_x=True,epoch=None):
-    '''
-    attn = torch tensor of attention
-    str_attn = utt_id
-    ylabels = list of words (including eos)
-    exp_dir = hparams["output_folder"]
-    '''
-    stacked_attn = torch.vstack(attn)
-    mean_attn = torch.mean(stacked_attn, dim=0)
-    plt.clf()
-    if word_x:
-        ax = sns.heatmap(torch.t(mean_attn).detach().cpu().numpy(), annot=False, xticklabels=ticklabels)
-        ax.set(title=f"Title", xlabel=f"Words", ylabel=f"Encoder idx")
-        ax.tick_params(axis='x', rotation=45)
-    else:
-        ax = sns.heatmap(mean_attn.detach().cpu().numpy(), annot=False, yticklabels=ticklabels)
-        ax.set(title=f"Title", xlabel=f"Encoder id", ylabel=f"Words")
-    fig = ax.get_figure()
-    fig.tight_layout()
-    
-    if str_attn in ['ACWT09a-13','adler15a-546','BU10a-508','kurland23b-574','scale05a-91']:
-        # AB
-        spkr = str_attn.split("-")[0]
-        sev = int(float(spk2aq[spkr]))
-        outdir = f"{exp_dir}/attention/AB/sev-{sev}_{str_attn}"
-    else:
-        # control
-        outdir = f"{exp_dir}/attention/Control/{str_attn}"
-    os.makedirs(outdir, exist_ok=True)
-    fig.savefig(f"{outdir}/ep-{epoch}.png")
-
-def disambiguate_string(s):
-    # return ''.join(f"{char}{sum(1 for _ in group)}" if sum(1 for _ in group) > 1 else char for char, group in groupby(s))
-    previous_char = ""
-    disambiguated_string = ""
-    count = 1
-
-    for char in s:
-        if char == previous_char:
-            count += 1
-        else:
-            if count > 1:
-                disambiguated_string += str(count)
-            disambiguated_string += char
-            previous_char = char
-            count = 1
-
-    # Handle the last character in case it was a part of a repetition
-    if count > 1:
-        disambiguated_string += str(count)
-
-    return disambiguated_string
 
 # Define training procedure
 class ASR(sb.Brain):
@@ -128,17 +67,23 @@ class ASR(sb.Brain):
         # forward modules
         w2v_out = self.modules.SSL_enc(wavs)
         # print(f"w2v_out: {w2v_out.shape}")
+        # (B, L, 1024)
 
-        pred,dec_mha = self.modules.Transformer(
-            w2v_out, tokens_bos, wav_lens, pad_idx=self.hparams.pad_index,
-        )
+        # enc_out, pred = self.modules.dec(w2v_out, tokens_bos, wav_lens)
+
+
+        e_in = self.modules.emb(tokens_bos)  # y_in bos + tokens
+        # print(f"e_in: {e_in.shape}")
+        h, _ = self.modules.dec(e_in, w2v_out, wav_lens)
+        # print(f"h: {h.shape}")
+
 
         # output layer for ctc log-probabilities
         logits = self.modules.ctc_lin(w2v_out)
         p_ctc = self.hparams.log_softmax(logits)
 
         # output layer for seq2seq log-probabilities
-        pred = self.modules.seq_lin(pred)
+        pred = self.modules.seq_lin(h)
         p_seq = self.hparams.log_softmax(pred)
 
         # Compute outputs
@@ -148,7 +93,7 @@ class ASR(sb.Brain):
         elif stage == sb.Stage.VALID:
             hyps = None
             current_epoch = self.hparams.epoch_counter.current
-            if current_epoch % self.hparams.valid_search_interval == 0 or (current_epoch == 1 and not self.hparams.use_language_modelling):
+            if current_epoch % self.hparams.valid_search_interval == 0 or current_epoch==1:
                 # for the sake of efficiency, we only perform beamsearch with limited capacity
                 # and no LM to give user some idea of how the AM is doing
                 hyps, _ = self.hparams.valid_search(w2v_out.detach(), wav_lens)
@@ -156,12 +101,12 @@ class ASR(sb.Brain):
             hyps, _ = self.hparams.test_search(w2v_out.detach(), wav_lens)
             
 
-        return p_ctc, p_seq, wav_lens, hyps, dec_mha
+        return p_ctc, p_seq, wav_lens, hyps
 
     def compute_objectives(self, predictions, batch, stage):
         """Computes the loss (CTC+NLL) given predictions and targets."""
 
-        (p_ctc, p_seq, wav_lens, hyps,dec_attn) = predictions
+        (p_ctc, p_seq, wav_lens, hyps) = predictions
 
         ids = batch.id
         tokens_eos, tokens_eos_lens = batch.tokens_eos
@@ -194,16 +139,13 @@ class ASR(sb.Brain):
         if stage != sb.Stage.TRAIN:
             current_epoch = self.hparams.epoch_counter.current
             valid_search_interval = self.hparams.valid_search_interval
-
-            if current_epoch % valid_search_interval == 0 or current_epoch==1 or stage == sb.Stage.TEST:
+            if current_epoch % valid_search_interval == 0 or current_epoch==1 or (
+                stage == sb.Stage.TEST
+            ):
                 if stage == sb.Stage.TEST and self.hparams.use_language_modelling:
                     predicted_words = []
-                    for logs, ctc in zip(p_seq, p_ctc):
-                        # print(f"logs: {logs.shape}")
-                        # print(f"ctc: {ctc.shape}")
+                    for logs in p_seq:
                         text = self.decoder.decode(logs.detach().cpu().numpy(), beam_width=100)
-                        # text = self.decoder.decode(ctc.detach().cpu().numpy(), beam_width=100)
-
                         # remove eos
                         eos_idx = text.find("<eos>")
                         text = text[:eos_idx]
@@ -226,22 +168,6 @@ class ASR(sb.Brain):
                 # exit()
                 self.wer_metric.append(ids, predicted_words, target_words)
                 self.cer_metric.append(ids, predicted_words, target_words)
-
-                # visualize attention
-                if self.hparams.val_attn_ids and (ids[0] in self.hparams.val_attn_ids):
-                # if ids[0] in self.hparams.val_attn_ids:
-                    # tick_labels = [self.tokenizer.id_to_piece(i.item()) for i in tokens_eos[0]]
-                    char_decode = [self.tokenizer.decode_ndim(i.item()) for i in tokens_eos[0]]
-                    add_space = []
-                    for i in range(len(char_decode)-1):
-                        if char_decode[i] == '<blank>' and char_decode[i+1] == '<blank>':
-                            add_space.append(" ")
-                        add_space.append(char_decode[i])
-                    tick_labels = "".join(add_space).split(" ")
-
-                    tick_labels = "".join([self.tokenizer.decode_ndim(i.item()) for i in tokens_eos[0]]).split(" ")
-                    visualize_attention(dec_attn,f"{ids[0]}",tick_labels,self.hparams.output_folder,word_x=True,epoch=current_epoch)
-
 
 
             # compute the accuracy of the one-step-forward prediction
@@ -319,8 +245,6 @@ class ASR(sb.Brain):
             )
             with open(self.hparams.wer_file, "w") as w:
                 self.wer_metric.write_stats(w)
-            with open(self.hparams.cer_file, "w") as w:
-                self.cer_metric.write_stats(w)
     
     def on_evaluate_start(self, max_key=None, min_key=None):
         """perform checkpoint averge if needed"""
@@ -466,10 +390,6 @@ def dataio_prepare(hparams):
     )
     def text_pipeline(wrd):
         yield wrd
-        wrd = disambiguate_string(wrd)
-        # print(f"wrd: {wrd}")
-        # if '3' in wrd:
-        #     exit()
         char_list = list(wrd)
         yield char_list
         tokens_list = label_encoder.encode_sequence(char_list)
@@ -596,17 +516,24 @@ if __name__ == "__main__":
             labels = [ind2lab[x] for x in range(len(ind2lab))]
             labels = [""] + labels[1:]  # Replace the <blank> token with a blank character, needed for PyCTCdecode
 
-            alpha_val = 0.6
+            # labels  = [asr_brain.tokenizer.id_to_piece(id).lower() for id in range(asr_brain.tokenizer.get_piece_size())]
+            # print(f"labels: {labels}")
+            # labels[10]=' ' # '_'
+            # labels[0] = '<pad>' # unk
+
+
+            # labels[0] = '' # unk
+            # print(f"labels: {labels}")
+            # exit()
+
             asr_brain.decoder = build_ctcdecoder(
                 labels,
                 kenlm_model_path=hparams[
                     "ngram_lm_path"
                 ],  # either .arpa or .bin file
-                alpha=alpha_val,  # Default by KenLM = 0.5
-                beta=1.0,  # Default by KenLM = 1.0
+                alpha=0.5,  # Default by KenLM
+                beta=1.0,  # Default by KenLM
             )
-            # print(f"decoder: {asr_brain.decoder.alpha}")
-            # exit()
     else:
         hparams["use_language_modelling"] = False
     
@@ -624,20 +551,12 @@ if __name__ == "__main__":
     # exit()
     print("\nEVALUATE\n")
     # Testing
-    if "use_language_modelling" in hparams and hparams["use_language_modelling"]:
-        asr_brain.hparams.wer_file = os.path.join(
-            hparams["output_folder"], f"wer_{alpha_val}.txt"
-        )
-        asr_brain.hparams.cer_file = os.path.join(
-            hparams["output_folder"], f"cer_{alpha_val}.txt"
-        )
-    else:
-        asr_brain.hparams.wer_file = os.path.join(
-            hparams["output_folder"], "wer.txt"
-        )
-        asr_brain.hparams.cer_file = os.path.join(
-            hparams["output_folder"], "cer.txt"
-        )
+    asr_brain.hparams.wer_file = os.path.join(
+        hparams["output_folder"], "wer.txt"
+    )
+    asr_brain.hparams.cer_file = os.path.join(
+        hparams["output_folder"], "cer.txt"
+    )
     asr_brain.evaluate(
         test_data, test_loader_kwargs=hparams["test_dataloader_opts"]
     )
