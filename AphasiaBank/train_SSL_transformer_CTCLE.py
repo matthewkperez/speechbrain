@@ -7,6 +7,8 @@ To run this recipe, do the followering:
 The neural network is trained on CTC likelihood target and character units
 are used as basic recognition tokens.
 
+Double char
+
 Authors
  * Rudolf A Braun 2022
  * Titouan Parcollet 2022
@@ -89,7 +91,9 @@ def visualize_attention(attn,str_attn,ticklabels,exp_dir,word_x=True,epoch=None)
     fig.savefig(f"{outdir}/ep-{epoch}.png")
 
 def disambiguate_string(s):
-    # return ''.join(f"{char}{sum(1 for _ in group)}" if sum(1 for _ in group) > 1 else char for char, group in groupby(s))
+    '''
+    Convert string with multiple repeated characters into string with numeric representations for char repetitions
+    '''
     previous_char = ""
     disambiguated_string = ""
     count = 1
@@ -109,6 +113,23 @@ def disambiguate_string(s):
         disambiguated_string += str(count)
 
     return disambiguated_string
+
+def revert_disambiguation(arr):
+    '''
+    Convert string with numeric representations into char
+    '''
+    s = " ".join(arr)
+    i = 0
+    reverted_string = ""
+    while i < len(s):
+        if s[i].isdigit():
+            count = int(s[i])
+            reverted_string += s[i - 1] * (count - 1)
+        else:
+            reverted_string += s[i]
+        i += 1
+    rev_arr = reverted_string.split()
+    return rev_arr
 
 # Define training procedure
 class ASR(sb.Brain):
@@ -148,10 +169,12 @@ class ASR(sb.Brain):
         elif stage == sb.Stage.VALID:
             hyps = None
             current_epoch = self.hparams.epoch_counter.current
-            if current_epoch % self.hparams.valid_search_interval == 0 or (current_epoch == 1 and not self.hparams.use_language_modelling):
+            if (current_epoch % self.hparams.valid_search_interval == 0 or current_epoch == 1) and not self.hparams.use_language_modelling:
                 # for the sake of efficiency, we only perform beamsearch with limited capacity
                 # and no LM to give user some idea of how the AM is doing
+                # print("time check1")
                 hyps, _ = self.hparams.valid_search(w2v_out.detach(), wav_lens)
+                # print("time check2\n")
         elif stage == sb.Stage.TEST and not self.hparams.use_language_modelling:
             hyps, _ = self.hparams.test_search(w2v_out.detach(), wav_lens)
             
@@ -196,7 +219,7 @@ class ASR(sb.Brain):
             valid_search_interval = self.hparams.valid_search_interval
 
             if current_epoch % valid_search_interval == 0 or current_epoch==1 or stage == sb.Stage.TEST:
-                if stage == sb.Stage.TEST and self.hparams.use_language_modelling:
+                if self.hparams.use_language_modelling:
                     predicted_words = []
                     for logs, ctc in zip(p_seq, p_ctc):
                         # print(f"logs: {logs.shape}")
@@ -217,13 +240,12 @@ class ASR(sb.Brain):
                         for utt_seq in hyps
                     ]
 
+                # convert back to normal form
+                predicted_words = [revert_disambiguation(sent) for sent in predicted_words]
+                # target_words = [wrd.split(" ") for wrd in batch.converted_wrd] # double letter
+                target_words = [wrd.split(" ") for wrd in batch.wrd] # og
 
 
-                # target_words = [wrd.upper().split(" ") for wrd in batch.wrd] # for libri
-                target_words = [wrd.split(" ") for wrd in batch.wrd] # AB
-                # print(f"predicted: {predicted_words}")
-                # print(f"target_words: {target_words}")
-                # exit()
                 self.wer_metric.append(ids, predicted_words, target_words)
                 self.cer_metric.append(ids, predicted_words, target_words)
 
@@ -411,8 +433,8 @@ def dataio_prepare(hparams):
         csv_path=hparams["valid_csv"], replacements={"data_root": data_folder}
     )
     
-    valid_data = valid_data.filtered_sorted(sort_key="duration", reverse=True,
-        key_max_value={"duration": hparams["max_length"]},
+    valid_data = valid_data.filtered_sorted(sort_key="duration",
+        key_max_value={"duration": hparams["max_length"]-3},
         key_min_value={"duration": hparams["min_length"]}
     )
 
@@ -420,7 +442,7 @@ def dataio_prepare(hparams):
     test_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["test_csv"], replacements={"data_root": data_folder}
     )
-    test_data = test_data.filtered_sorted(sort_key="duration",reverse=True,
+    test_data = test_data.filtered_sorted(sort_key="duration",
         key_max_value={"duration": hparams["max_length"]},
         key_min_value={"duration": hparams["min_length"]}
     )
@@ -462,15 +484,16 @@ def dataio_prepare(hparams):
     # 3. Define text pipeline:
     @sb.utils.data_pipeline.takes("wrd")
     @sb.utils.data_pipeline.provides(
-        "wrd", "char_list", "tokens_list", "tokens_bos", "tokens_eos", "tokens"
+        "wrd", "converted_wrd", "char_list", "tokens_list", "tokens_bos", "tokens_eos", "tokens"
     )
     def text_pipeline(wrd):
         yield wrd
-        wrd = disambiguate_string(wrd)
+        converted_wrd = disambiguate_string(wrd)
         # print(f"wrd: {wrd}")
         # if '3' in wrd:
         #     exit()
-        char_list = list(wrd)
+        yield converted_wrd
+        char_list = list(converted_wrd)
         yield char_list
         tokens_list = label_encoder.encode_sequence(char_list)
         yield tokens_list
@@ -500,7 +523,7 @@ def dataio_prepare(hparams):
 
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        datasets, ["id", "sig", "wrd","char_list", "tokens_bos", "tokens_eos", "tokens"],
+        datasets, ["id", "sig", "wrd", "converted_wrd","char_list", "tokens_bos", "tokens_eos", "tokens"],
     )
 
 
@@ -596,7 +619,7 @@ if __name__ == "__main__":
             labels = [ind2lab[x] for x in range(len(ind2lab))]
             labels = [""] + labels[1:]  # Replace the <blank> token with a blank character, needed for PyCTCdecode
 
-            alpha_val = 0.6
+            alpha_val = 0.5
             asr_brain.decoder = build_ctcdecoder(
                 labels,
                 kenlm_model_path=hparams[
