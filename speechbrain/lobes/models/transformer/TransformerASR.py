@@ -197,7 +197,8 @@ class TransformerASR(TransformerInterface):
             pos_embs_target = None
             pos_embs_encoder = None
 
-        decoder_out, _, _ = self.decoder(
+        # decoder_out, self_attn, mh_attn = self.decoder(
+        decoder_out, _, mh_attn = self.decoder(
             tgt=tgt,
             memory=encoder_out,
             memory_mask=src_mask,
@@ -208,7 +209,7 @@ class TransformerASR(TransformerInterface):
             pos_embs_src=pos_embs_encoder,
         )
 
-        return encoder_out, decoder_out
+        return encoder_out, decoder_out, mh_attn
 
     def make_masks(self, src, tgt, wav_len=None, pad_idx=0):
         """This method generates the masks for training the transformer model.
@@ -308,12 +309,13 @@ class TransformerASR(TransformerInterface):
             src = src + self.positional_encoding(src)
             pos_embs_source = None
 
-        encoder_out, _ = self.encoder(
+        encoder_out, attn = self.encoder(
             src=src,
             src_key_padding_mask=src_key_padding_mask,
             pos_embs=pos_embs_source,
         )
-        return encoder_out
+        # print(f"lne: {len(attn)}")
+        return encoder_out,attn[-1]
 
     def _init_params(self):
         for p in self.parameters():
@@ -609,5 +611,3 @@ class TransformerDecoderASR(TransformerInterface):
         for p in self.parameters():
             if p.dim() > 1:
                 torch.nn.init.xavier_normal_(p)
-
-
