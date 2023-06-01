@@ -156,13 +156,16 @@ class HuggingFaceWav2Vec2(nn.Module):
             for param in self.model.parameters():
                 param.requires_grad = False
         else:
-            self.model.train()
+            # freeze = false
+        
             if self.freeze_feature_extractor:
                 # model freezing
                 # freeze entire modal
+                self.model.train()
                 for param in self.model.parameters():
                     param.requires_grad = False
                 
+
                 # unfreeze last two layers everything but last layer
                 for i in [-1]:
                     # self.model.encoder.layers[i]._freeze_parameters()
@@ -176,7 +179,6 @@ class HuggingFaceWav2Vec2(nn.Module):
                 for param in self.model.feature_extractor.parameters():
                     param.requires_grad = False
 
-                    
         self.output_all_hiddens = output_all_hiddens
 
     def _from_pretrained(self, source, config, model, save_path):

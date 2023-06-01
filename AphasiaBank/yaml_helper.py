@@ -38,7 +38,7 @@ def create_yaml_torre(args):
         lr_decoder = "0.9"
         lr_anneal_factor_decoder = "0.8" # og = 0.8
         patience = "1"
-        data_dir = "/z/mkperez/speechbrain/AphasiaBank/data/personalization_torre"
+        data_dir = "/y/mkperez/speechbrain/AphasiaBank/data/personalization_torre"
         mtl = "False"
         train_data = "train_no_kansas.csv" # [train_no_kansas.csv, train_all.csv]
         val_data = "val_no_kansas.csv"
@@ -58,7 +58,7 @@ def create_yaml_torre(args):
         lr_anneal_factor_decoder = "0.8" # og = 0.8
         patience = "1"
         mtl = "False"
-        data_dir = "/z/mkperez/speechbrain/AphasiaBank/data/personalization_torre"
+        data_dir = "/y/mkperez/speechbrain/AphasiaBank/data/personalization_torre"
         train_data = "train_all.csv" # [train_no_kansas.csv, train_all.csv]
         val_data = "val_no_kansas.csv" # [val_kansas.csv, val_no_kansas.csv]
         test_data = "test_kansas.csv"
@@ -116,7 +116,7 @@ def create_yaml_personalization(args):
         lr_anneal_factor_decoder = "0.8" # og = 0.8
         patience = "0"
         mtl = "False"
-        data_dir = "/z/mkperez/speechbrain/AphasiaBank/data/personalization_torre"
+        data_dir = "/y/mkperez/speechbrain/AphasiaBank/data/personalization_torre"
         train_data = "train_kansas.csv" # [train_no_kansas.csv, train_all.csv]
         val_data = "val_kansas.csv" # [val_kansas.csv, val_no_kansas.csv]
         test_data = "test_kansas.csv"
@@ -161,7 +161,7 @@ def create_yaml_PT_FT_fluency(args):
         
 
     # Create new yaml and return path to generated yaml
-    base_yaml = "/z/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/base_placeholder.yaml"
+    base_yaml = "/y/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/base_placeholder.yaml"
     exp_name = args.exp_name
     sev_arg = args.severity
     print(f"Making YAML: {exp_name} - {sev_arg}")
@@ -177,7 +177,7 @@ def create_yaml_PT_FT_fluency(args):
     # variables
     assert args.severity in ['PT', 'FT']
     assert args.fluency in ['Fluent', 'Non-Fluent']
-    data_root="/z/mkperez/speechbrain/AphasiaBank/data/Duc_process"
+    data_root="/y/mkperez/speechbrain/AphasiaBank/data/Duc_process"
     data_folder=f"{data_root}/PT_FT-fluency/{args.fluency}"
 
     model = ['facebook/wav2vec2-large-960h-lv60-self','facebook/hubert-large-ll60k'][0]
@@ -232,7 +232,7 @@ def create_yaml_PT_FT(args):
     Warmup PT + FT
     '''
     # Create new yaml and return path to generated yaml
-    base_yaml = "/z/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/base_placeholder.yaml"
+    base_yaml = "/y/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/base_placeholder.yaml"
     exp_name = args.exp_name
     sev_arg = args.severity
     print(f"Making YAML: {exp_name} - {sev_arg}")
@@ -246,7 +246,7 @@ def create_yaml_PT_FT(args):
 
 
     # variables
-    data_root="/z/mkperez/speechbrain/AphasiaBank/data/Duc_process"
+    data_root="/y/mkperez/speechbrain/AphasiaBank/data/Duc_process"
     data_folder=f"{data_root}"
 
     model_path = ['facebook/wav2vec2-large-960h-lv60-self','facebook/hubert-large-ll60k','openai/whisper-large-v2'][2]
@@ -289,6 +289,72 @@ def create_yaml_PT_FT(args):
         with open(outfile,'w') as fout:
             fout.write(filedata)
 
+def create_yaml_PT_FT_subtype(args):
+    # Create new yaml and return path to generated yaml
+    base_yaml = "/y/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/base_placeholder.yaml"
+    exp_name = args.exp_name
+    sev_arg = args.severity
+    print(f"Making YAML: {exp_name} - {sev_arg}")
+
+    outfile = args.outfile
+    outdir = "/".join(outfile.split("/")[:-1])
+    os.makedirs(f"{outdir}", exist_ok=True)
+    
+    # copy file over
+    shutil.copyfile(base_yaml, outfile)
+
+
+    # variables
+    assert args.severity in ['PT', 'FT']
+    assert args.subtype in ["Anomic", "Broca", "Conduction", "Global", "TransMotor", "TransSensory", "Wernicke"]
+    data_root="/y/mkperez/speechbrain/AphasiaBank/data/Duc_process"
+    data_folder=f"{data_root}/PT_FT-subtype/{args.subtype}"
+
+    model = ['facebook/wav2vec2-large-960h-lv60-self','facebook/hubert-large-ll60k'][0]
+    model_str= model.split("/")[-1].split("-")[0]
+    freeze = False #Change back
+    batch_size=9
+    grad_acc=16
+    train_data=f"<data_folder>/{args.severity}_train.csv"
+    dev_data=f"<data_folder>/{args.severity}_dev.csv"
+    test_data=f"<data_folder>/test.csv"
+    exp_out_folder=f"results/duc_process/PT-FT_subtype/{args.severity}-{args.subtype}/No-LM_{model_str}/freeze-<freeze_wav2vec>"
+    
+
+    if args.severity == 'PT':
+        epochs=15
+        wav2vec2_lr="1.e-4"
+        decoder_lr=0.9
+    elif args.severity == 'FT':
+        epochs=30
+        wav2vec2_lr="8.e-5"
+        decoder_lr=0.55
+
+
+    # replace with raw text
+    with open(outfile) as fin:
+        filedata = fin.read()
+        filedata = filedata.replace('model_PLACEHOLDER', f"{model}")
+        filedata = filedata.replace('freeze_PLACEHOLDER', f"{freeze}")
+        filedata = filedata.replace('batch_size_PLACEHOLDER', f"{batch_size}")
+        filedata = filedata.replace('grad_acc_PLACEHOLDER', f"{grad_acc}")
+        filedata = filedata.replace('epoch_PLACEHOLDER', f"{epochs}")
+        filedata = filedata.replace('train_data_PLACEHOLDER', f"{train_data}")
+        filedata = filedata.replace('val_data_PLACEHOLDER', f"{dev_data}")
+        filedata = filedata.replace('test_data_PLACEHOLDER', f"{test_data}")
+        filedata = filedata.replace('exp_out_folder_PLACEHOLDER', f"{exp_out_folder}")
+        filedata = filedata.replace('data_dir_PLACEHOLDER', f"{data_folder}")
+        filedata = filedata.replace('w2v_lr_PLACEHOLDER', f"{wav2vec2_lr}")
+        filedata = filedata.replace('lr_decoder_PLACEHOLDER', f"{decoder_lr}")
+        # filedata = filedata.replace('mtl_PLACEHOLDER', f"{mtl}")
+        # filedata = filedata.replace('lr_anneal_factor_w2v2_PLACEHOLDER', f"{lr_anneal_factor_w2v2}")
+        # filedata = filedata.replace('lr_anneal_factor_decoder_PLACEHOLDER', f"{lr_anneal_factor_decoder}")
+        # filedata = filedata.replace('patience_PLACEHOLDER', f"{patience}")
+        # filedata = filedata.replace('personalized_speaker_PLACEHOLDER', f"{personalized_speaker}")
+        
+
+        with open(outfile,'w') as fout:
+            fout.write(filedata)
 
 
 if __name__ == "__main__":
@@ -302,6 +368,7 @@ if __name__ == "__main__":
     parser.add_argument('-o', '--outfile')
     parser.add_argument('-p', '--personalized_speaker')
     parser.add_argument('-f', '--fluency')
+    parser.add_argument('-t', '--subtype')
 
     args = parser.parse_args()
 
@@ -314,6 +381,9 @@ if __name__ == "__main__":
 
     elif args.exp_name == "PT_FT" and args.fluency:
         create_yaml_PT_FT_fluency(args)
+
+    elif args.exp_name == "PT_FT" and args.subtype:
+        create_yaml_PT_FT_subtype(args)
 
     elif args.exp_name == "PT_FT" and args.severity in ['warmup', 'FT']:
         create_yaml_PT_FT(args)

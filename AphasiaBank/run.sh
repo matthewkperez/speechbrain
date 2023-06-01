@@ -1,7 +1,7 @@
 
 
 
-stage=5
+stage=6
 
 
 if [ $stage == 0 ] || [ $stage == 1 ]; then
@@ -80,7 +80,7 @@ fi
 
 if [ $stage == 0 ] || [ $stage == 3 ]; then
     echo "Personalize"
-    kansas_wav_ar=(/z/public/data/AphasiaBank/Aphasia/Kansas/*.wav)
+    kansas_wav_ar=(/y/public/data/AphasiaBank/Aphasia/Kansas/*.wav)
     for index in "${!kansas_wav_ar[@]}"; do
         title="personalize"
         kansas_speaker_wav=`basename ${kansas_wav_ar[$index]}`
@@ -121,7 +121,7 @@ if [ $stage == 0 ] || [ $stage == 4 ]; then
 
     stages="warmup FT" # warmup FT
     for stage in $stages; do
-        out_yaml="/z/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/fluency/updated.yaml"
+        out_yaml="/y/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/fluency/updated.yaml"
         python yaml_helper.py -e "PT_FT" -s $stage -o $out_yaml
 
     done
@@ -131,14 +131,14 @@ fi
 
 if [ $stage == 0 ] || [ $stage == 5 ]; then
     echo "Pretrain and Finetune based on fluency"
-    data_dir="/z/mkperez/speechbrain/AphasiaBank/data/Duc_process"
+    data_dir="/y/mkperez/speechbrain/AphasiaBank/data/Duc_process"
     
     # # # csv generation
     # python helper_scripts/partition_PT-FT_data.py 'fluency' $data_dir
 
     # PT_FT_list="PT FT"
-    fluent="Fluent" # Fluent Non-Fluent
-    PT_FT_list="FT" # PT FT
+    fluent="Fluent Non-Fluent" # Fluent Non-Fluent
+    PT_FT_list="PT" # PT FT
     for PT_FT_var in $PT_FT_list; do
         if [ $PT_FT_var == 'FT' ]; then
             PT_path="/y/mkperez/speechbrain/AphasiaBank/results/duc_process/PT-FT_fluency/PT-${fluent}/No-LM_wav2vec2/freeze-False"
@@ -149,12 +149,48 @@ if [ $stage == 0 ] || [ $stage == 5 ]; then
             fi
         fi
 
-        out_yaml="/z/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/fluency/updated.yaml"
+        out_yaml="/y/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/fluency/updated.yaml"
         python yaml_helper.py -e "PT_FT" -s ${PT_FT_var} -o ${out_yaml} -f ${fluent} 
         
         # exit
-        CUDA_VISIBLE_DEVICES=1 python train.py $out_yaml
+        CUDA_VISIBLE_DEVICES=0,1,2,3 python train.py $out_yaml
     done
 
+    
+fi
+
+if [ $stage == 0 ] || [ $stage == 6 ]; then
+    echo "Pretrain and Finetune based on subtype"
+    data_dir="/y/mkperez/speechbrain/AphasiaBank/data/Duc_process"
+    
+    # # # csv generation
+    # python helper_scripts/partition_PT-FT_data.py 'subtype' $data_dir
+    # exit
+
+    # subtypes="Anomic Broca Conduction Global TransMotor TransSensory Wernicke" # Fluent Non-Fluent
+    # subtypes="Anomic Broca Conduction Wernicke" 
+    subtypes="Anomic" 
+    PT_FT_list="PT FT" # PT FT
+    for subtype in $subtypes; do
+        for PT_FT_var in $PT_FT_list; do
+            if [ $PT_FT_var == 'FT' ]; then
+                PT_path="/y/mkperez/speechbrain/AphasiaBank/results/duc_process/PT-FT_subtype/PT-${subtype}/No-LM_wav2vec2/freeze-False"
+                FT_path="/y/mkperez/speechbrain/AphasiaBank/results/duc_process/PT-FT_subtype/FT-${subtype}/No-LM_wav2vec2/freeze-False"
+                if [ ! -d FT_path ]; then
+                    mkdir -p $FT_path
+                    cp -r $PT_path/save $FT_path
+                fi
+            fi
+
+            out_yaml="/y/mkperez/speechbrain/AphasiaBank/hparams/Duc_process/PT_FT/subtype/updated.yaml"
+            python yaml_helper.py -e "PT_FT" -s ${PT_FT_var} -o ${out_yaml} -t ${subtype} 
+            
+      
+            # CUDA_VISIBLE_DEVICES=0,1 python -m torch.distributed.launch --nproc_per_node=2 --nnodes=1 --node_rank=0 train.py $out_yaml --distributed_launch --distributed_backend='nccl' --find_unused_parameters
+            CUDA_VISIBLE_DEVICES=0,1,2 python train.py $out_yaml --data_parallel_backend
+
+            exit
+        done
+    done
     
 fi

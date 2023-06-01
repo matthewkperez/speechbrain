@@ -1,49 +1,49 @@
 # ################################
 # Model: wav2vec2 + DNN + CTC
 # Augmentation: SpecAugment
-# Authors: Sung-Lin Yeh 2021
+# Taken from Librispeech recipe
 # ################################
 
 # Seed needs to be set at top of yaml, before objects with parameters are made
-seed: 1986
+seed: 2000
+lr: 0.9
+lr_wav2vec: 1.e-4
+number_of_epochs: 15
+freeze_wav2vec: False
+freeze_feature_extractor_wav2vec: True # procs when freeze_wav2vec = False, only retrain transformers
 __set_seed: !apply:torch.manual_seed [!ref <seed>]
-output_folder: !ref results/train_wav2vec2_char/<seed>
+output_folder: !ref results/duc_process/PT-FT_subtype/PT-Anomic/No-LM_wav2vec2/freeze-<freeze_wav2vec>
 wer_file: !ref <output_folder>/wer.txt
 save_folder: !ref <output_folder>/save
 train_log: !ref <output_folder>/train_log.txt
+# data_dir: /z/mkperez/speechbrain/AphasiaBank/data/Duc_process
+data_folder: !ref /y/mkperez/speechbrain/AphasiaBank/data/Duc_process/PT_FT-subtype/Anomic
+mtl_flag: False
 
 # URL for the biggest Fairseq english wav2vec2 model.
-wav2vec2_hub: facebook/wav2vec2-large-960h-lv60-self
-wav2vec2_folder: !ref <save_folder>/wav2vec2_checkpoint
+wav2vec2_hub: !ref facebook/wav2vec2-large-960h-lv60-self
 
 # Data files
-data_folder: /y/public/data/LibriSpeech # e,g./path/to/LibriSpeech
-# noise/ris dataset will automatically be downloaded
-# data_folder_rirs: !ref <data_folder>
-train_splits: ["train-clean-100"]
-dev_splits: ["dev-clean"]
-test_splits: ["test-clean"]
+train_splits: ["train"]
+dev_splits: ["dev"]
+test_splits: ["test"]
 skip_prep: False
 ckpt_interval_minutes: 25 # save checkpoint every N min
-train_csv: !ref <output_folder>/train.csv
-valid_csv: !ref <output_folder>/dev-clean.csv
-test_csv:
-   - !ref <output_folder>/test-clean.csv
+train_csv: !ref <data_folder>/PT_train.csv
+valid_csv: !ref <data_folder>/PT_dev.csv
+test_csv: !ref <data_folder>/test.csv
 
 # Training parameters
-number_of_epochs: 1
-lr: 0.9
-lr_wav2vec: 0.0001
 sorting: ascending
-auto_mix_prec: True
+auto_mix_prec: False
 sample_rate: 16000
-
-
-# With data_parallel batch_size is split into N jobs
-# With DDP batch_size is multiplied by N jobs
-# Must be 3 per GPU to fit 32GB of VRAM
-batch_size: 2
-test_batch_size: 8
+max_length: 10 # change to 20
+min_length: 0.5
+max_sev_train: 4
+min_sev_train: -1
+batch_size: 9 # start with 16, change to 2
+test_batch_size: 2
+grad_accumulation_factor: 16
 
 # Dataloader options
 train_dataloader_opts:
@@ -59,10 +59,9 @@ test_dataloader_opts:
 activation: !name:torch.nn.LeakyReLU
 dnn_layers: 2
 dnn_neurons: 1024
-freeze_wav2vec: False
 
-# Outputs
-output_neurons: 29  # BPE size, index(blank/eos/bos) = 0 (31 is og)
+# Outputs 28 = tokenizer for greedy CTC 
+output_neurons: 28  # BPE size, index(blank/eos/bos) = 0
 
 # Decoding parameters
 blank_index: 0
@@ -75,7 +74,7 @@ epoch_counter: !new:speechbrain.utils.epoch_loop.EpochCounter
 
 augmentation: !new:speechbrain.lobes.augment.TimeDomainSpecAugment
    sample_rate: !ref <sample_rate>
-   speeds: [95, 100, 105]
+   speeds: [80, 90, 95, 100, 105, 110, 120]
 
 enc: !new:speechbrain.lobes.models.VanillaNN.VanillaNN
    input_shape: [null, null, 1024]
@@ -87,7 +86,9 @@ wav2vec2: !new:speechbrain.lobes.models.huggingface_wav2vec.HuggingFaceWav2Vec2
    source: !ref <wav2vec2_hub>
    output_norm: True
    freeze: !ref <freeze_wav2vec>
-   save_path: !ref <wav2vec2_folder>
+   freeze_feature_extractor: !ref <freeze_feature_extractor_wav2vec>
+   save_path: !ref <save_folder>/wav2vec2_checkpoint
+
 
 #####
 # Uncomment this block if you prefer to use a Fairseq pretrained model instead
@@ -131,13 +132,13 @@ lr_annealing_model: !new:speechbrain.nnet.schedulers.NewBobScheduler
    initial_value: !ref <lr>
    improvement_threshold: 0.0025
    annealing_factor: 0.8
-   patient: 0
+   patient: 1
 
 lr_annealing_wav2vec: !new:speechbrain.nnet.schedulers.NewBobScheduler
    initial_value: !ref <lr_wav2vec>
    improvement_threshold: 0.0025
    annealing_factor: 0.9
-   patient: 0
+   patient: 1
 
 label_encoder: !new:speechbrain.dataio.encoder.CTCTextEncoder
 

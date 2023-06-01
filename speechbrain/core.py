@@ -568,8 +568,8 @@ class Brain:
             self.scaler = torch.cuda.amp.GradScaler()
 
             # only add scaler recoverable if present
-            # if self.checkpointer is not None:
-                # self.checkpointer.add_recoverable("scaler", self.scaler)
+            if self.checkpointer is not None:
+                self.checkpointer.add_recoverable("scaler", self.scaler)
 
         # List parameter count for the user
         total_params = sum(
@@ -1229,6 +1229,7 @@ class Brain:
                 or self._optimizer_step_limit_exceeded
             ):
                 break
+        print("done training")
 
     @property
     def _optimizer_step_limit_exceeded(self):
