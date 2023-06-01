@@ -1,13 +1,16 @@
 #!/usr/bin/env/python3
-"""Recipe for training a wav2vec-based ctc ASR system with librispeech.
+"""
+Double char implementation
+
+
+
+Recipe for training a wav2vec-based ctc ASR system with librispeech.
 The system employs wav2vec as its encoder. Decoding is performed with
 ctc greedy decoder.
 To run this recipe, do the followering:
 > python train_with_wav2vec.py hparams/train_{hf,sb}_wav2vec.yaml
 The neural network is trained on CTC likelihood target and character units
 are used as basic recognition tokens.
-
-Double char
 
 Authors
  * Rudolf A Braun 2022

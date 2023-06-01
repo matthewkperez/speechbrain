@@ -90,6 +90,47 @@ def visualize_attention(attn,str_attn,ticklabels,exp_dir,word_x=True,epoch=None)
     os.makedirs(outdir, exist_ok=True)
     fig.savefig(f"{outdir}/ep-{epoch}.png")
 
+def disambiguate_string(s):
+    '''
+    Convert string with multiple repeated characters into string with numeric representations for char repetitions
+    '''
+    previous_char = ""
+    disambiguated_string = ""
+    count = 1
+
+    for char in s:
+        if char == previous_char:
+            count += 1
+        else:
+            if count > 1:
+                disambiguated_string += str(count)
+            disambiguated_string += char
+            previous_char = char
+            count = 1
+
+    # Handle the last character in case it was a part of a repetition
+    if count > 1:
+        disambiguated_string += str(count)
+
+    return disambiguated_string
+
+def revert_disambiguation(arr):
+    '''
+    Convert string with numeric representations into char
+    '''
+    s = " ".join(arr)
+    i = 0
+    reverted_string = ""
+    while i < len(s):
+        if s[i].isdigit():
+            count = int(s[i])
+            reverted_string += s[i - 1] * (count - 1)
+        else:
+            reverted_string += s[i]
+        i += 1
+    rev_arr = reverted_string.split()
+    return rev_arr
+
 
 # Define training procedure
 class ASR(sb.Brain):
@@ -119,8 +160,6 @@ class ASR(sb.Brain):
         # forward modules
         # print(f"feats: {feats.shape}")
         src = self.modules.CNN(feats)
-        # print(f"CNN_out: {src.shape}")
-        # exit()
 
         # enc_out, pred = self.modules.Transformer(
         #     src, tokens_bos, wav_lens, pad_idx=self.hparams.pad_index,
@@ -144,11 +183,11 @@ class ASR(sb.Brain):
         elif stage == sb.Stage.VALID:
             hyps = None
             current_epoch = self.hparams.epoch_counter.current
-            if current_epoch % self.hparams.valid_search_interval == 0:
+            if (current_epoch % self.hparams.valid_search_interval == 0 or current_epoch == 1) and not self.hparams.use_language_modelling:
                 # for the sake of efficiency, we only perform beamsearch with limited capacity
                 # and no LM to give user some idea of how the AM is doing
                 hyps, _ = self.hparams.valid_search(enc_out.detach(), wav_lens)
-        elif stage == sb.Stage.TEST:
+        elif stage == sb.Stage.TEST and not self.hparams.use_language_modelling:
             hyps, _ = self.hparams.test_search(enc_out.detach(), wav_lens)
 
         return p_ctc, p_seq, wav_lens, hyps, dec_mha
@@ -188,31 +227,53 @@ class ASR(sb.Brain):
         if stage != sb.Stage.TRAIN:
             current_epoch = self.hparams.epoch_counter.current
             valid_search_interval = self.hparams.valid_search_interval
-            # print(f"{current_epoch} | {valid_search_interval} | {current_epoch % valid_search_interval}")
-            if current_epoch % valid_search_interval == 0 or (
-                stage == sb.Stage.TEST
-            ):
-                # print("visualize")
-                # Decode token terms to words
-                predicted_words = [
-                    self.tokenizer.decode_ids(utt_seq).split(" ") for utt_seq in hyps
-                ]
-                # target_words = [wrd.upper().split(" ") for wrd in batch.wrd] # for libri
-                target_words = [wrd.split(" ") for wrd in batch.wrd] # AB
+
+            if current_epoch % valid_search_interval == 0 or current_epoch==1 or stage == sb.Stage.TEST:
+                if self.hparams.use_language_modelling:
+                    predicted_words = []
+                    for logs, ctc in zip(p_seq, p_ctc):
+                        # print(f"logs: {logs.shape}")
+                        # print(f"ctc: {ctc.shape}")
+                        text = self.decoder.decode(logs.detach().cpu().numpy(), beam_width=100)
+                        # text = self.decoder.decode(ctc.detach().cpu().numpy(), beam_width=100)
+
+                        # remove eos
+                        eos_idx = text.find("<eos>")
+                        text = text[:eos_idx]
+                        predicted_words.append(text.split(" "))
+
+
+                else:
+                    # Decode token terms to words
+                    predicted_words = [
+                        "".join(self.tokenizer.decode_ndim(utt_seq)).split(" ")
+                        for utt_seq in hyps
+                    ]
+
+                # convert back to normal form
+                predicted_words = [revert_disambiguation(sent) for sent in predicted_words]
+                # target_words = [wrd.split(" ") for wrd in batch.converted_wrd] # double letter
+                target_words = [wrd.split(" ") for wrd in batch.wrd] # og
+
+
                 self.wer_metric.append(ids, predicted_words, target_words)
                 self.cer_metric.append(ids, predicted_words, target_words)
 
                 # visualize attention
-                if ids[0] in self.hparams.val_attn_ids:
-                    # print("visualize")
-                    # tick_labels=[]
-                    # for i in tokens_eos[0]:
-                    #     print(f"i: {i} | {type(i)}")
-                    #     i = i.item()
-                    #     print(f"i: {i} | {type(i)}")
-                    #     tick_labels.append(self.tokenizer.id_to_piece(i))
-                    tick_labels = [self.tokenizer.id_to_piece(i.item()) for i in tokens_eos[0]]
+                if self.hparams.val_attn_ids and (ids[0] in self.hparams.val_attn_ids):
+                # if ids[0] in self.hparams.val_attn_ids:
+                    # tick_labels = [self.tokenizer.id_to_piece(i.item()) for i in tokens_eos[0]]
+                    char_decode = [self.tokenizer.decode_ndim(i.item()) for i in tokens_eos[0]]
+                    add_space = []
+                    for i in range(len(char_decode)-1):
+                        if char_decode[i] == '<blank>' and char_decode[i+1] == '<blank>':
+                            add_space.append(" ")
+                        add_space.append(char_decode[i])
+                    tick_labels = "".join(add_space).split(" ")
+
+                    tick_labels = "".join([self.tokenizer.decode_ndim(i.item()) for i in tokens_eos[0]]).split(" ")
                     visualize_attention(dec_attn,f"{ids[0]}",tick_labels,self.hparams.output_folder,word_x=True,epoch=current_epoch)
+
 
 
             # compute the accuracy of the one-step-forward prediction
@@ -255,7 +316,7 @@ class ASR(sb.Brain):
 
             # lr = self.hparams.noam_annealing.current_lr
             # newBOB
-            lr, new_lr_model = self.hparams.noam_annealing(
+            lr, new_lr_model = self.hparams.lr_annealing(
                 stage_stats["loss"]
             )
             sb.nnet.schedulers.update_learning_rate(
@@ -338,7 +399,7 @@ class ASR(sb.Brain):
         self.on_fit_batch_end(batch, outputs, loss, should_step)
         return loss.detach().cpu()
 
-def dataio_prepare(hparams,tokenizer):
+def dataio_prepare(hparams):
     """This function prepares the datasets to be used in the brain class.
     It also defines the data processing pipeline through user-defined functions."""
     data_folder = hparams["data_folder"]
@@ -352,32 +413,12 @@ def dataio_prepare(hparams,tokenizer):
     # print(train_data.data)
     # exit()
     if hparams["sorting"] == "ascending":
-        if 'tr_speaker' in hparams:
-            # print(train_data.data['kansas12a-59'])
-            # create numeric speaker_id
-            print(f"hparams: {hparams['tr_speaker']}")
-            tr_speaker_int = int(re.findall(r'\d+', hparams["tr_speaker"])[0])
-            train_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in train_data.data.items()}
-            # we sort training data to speed up training and get better results.
-            train_data = train_data.filtered_sorted(sort_key="duration",
-                key_max_value={"duration": hparams["max_length"], 
-                    "severity_cat": hparams["max_sev_train"],
-                    "spk_id": tr_speaker_int
-                },
-                key_min_value={"duration": hparams["min_length"], 
-                    "severity_cat": hparams["min_sev_train"],
-                    "spk_id": tr_speaker_int
-                },
-            )
+        # we sort training data to speed up training and get better results.
+        train_data = train_data.filtered_sorted(sort_key="duration",
+            key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
+            key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
 
-        else:
-            # we sort training data to speed up training and get better results.
-            train_data = train_data.filtered_sorted(sort_key="duration",
-                key_max_value={"duration": hparams["max_length"], "severity_cat": hparams["max_sev_train"]},
-                key_min_value={"duration": hparams["min_length"], "severity_cat": hparams["min_sev_train"]},
-
-            )
-
+        )
         # when sorting do not shuffle in dataloader ! otherwise is pointless
         hparams["train_dataloader_opts"]["shuffle"] = False
     elif hparams["sorting"] == "descending":
@@ -398,42 +439,20 @@ def dataio_prepare(hparams,tokenizer):
     valid_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["valid_csv"], replacements={"data_root": data_folder}
     )
-    if 'tr_speaker' in hparams:
-        valid_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in valid_data.data.items()}
-        # we sort training data to speed up training and get better results.
-        valid_data = valid_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"], 
-                "spk_id": tr_speaker_int
-            },
-            key_min_value={"duration": hparams["min_length"], 
-                "spk_id": tr_speaker_int
-            },
-        )
-    else:
-        valid_data = valid_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"]},
-            key_min_value={"duration": hparams["min_length"]}
-        )
+    
+    valid_data = valid_data.filtered_sorted(sort_key="duration", reverse=True,
+        key_max_value={"duration": hparams["max_length"]},
+        key_min_value={"duration": hparams["min_length"]}
+    )
+
 
     test_data = sb.dataio.dataset.DynamicItemDataset.from_csv(
         csv_path=hparams["test_csv"], replacements={"data_root": data_folder}
     )
-    if 'tr_speaker' in hparams:
-        test_data.data = {k:{k_2: (int(re.findall(r'\d+', v_2)[0]) if k_2 == 'spk_id' else v_2) for k_2,v_2 in v.items()} for k,v in test_data.data.items()}
-        # we sort training data to speed up training and get better results.
-        test_data = test_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"], 
-                "spk_id": tr_speaker_int
-            },
-            key_min_value={"duration": hparams["min_length"], 
-                "spk_id": tr_speaker_int
-            },
-        )
-    else:
-        test_data = test_data.filtered_sorted(sort_key="duration",
-            key_max_value={"duration": hparams["max_length"]},
-            key_min_value={"duration": hparams["min_length"]}
-        )
+    test_data = test_data.filtered_sorted(sort_key="duration",reverse=True,
+        key_max_value={"duration": hparams["max_length"]},
+        key_min_value={"duration": hparams["min_length"]}
+    )
 
     datasets = [train_data, valid_data, test_data]
     valtest_datasets = [valid_data,test_data]
@@ -467,17 +486,20 @@ def dataio_prepare(hparams,tokenizer):
         return sig
 
     sb.dataio.dataset.add_dynamic_item([train_data], audio_pipeline_train)
-
+    label_encoder = sb.dataio.encoder.CTCTextEncoder()
+    
     # 3. Define text pipeline:
     @sb.utils.data_pipeline.takes("wrd")
     @sb.utils.data_pipeline.provides(
-        "wrd", "tokens_list", "tokens_bos", "tokens_eos", "tokens"
+        "wrd", "converted_wrd", "char_list", "tokens_list", "tokens_bos", "tokens_eos", "tokens"
     )
     def text_pipeline(wrd):
         yield wrd
-        tokens_list = tokenizer.sp.encode_as_ids(wrd)
-        # print(f"tokens_list: {tokens_list}")
-        # tokens_list = tokenizer.encode_as_ids(wrd)
+        converted_wrd = disambiguate_string(wrd)
+        yield converted_wrd
+        char_list = list(converted_wrd)
+        yield char_list
+        tokens_list = label_encoder.encode_sequence(char_list)
         yield tokens_list
         tokens_bos = torch.LongTensor([hparams["bos_index"]] + (tokens_list))
         yield tokens_bos
@@ -488,9 +510,24 @@ def dataio_prepare(hparams,tokenizer):
 
     sb.dataio.dataset.add_dynamic_item(datasets, text_pipeline)
 
+    lab_enc_file = os.path.join(hparams["save_folder"], "label_encoder.txt")
+    # add special labels
+    special_labels = {
+        "blank_label": hparams["blank_index"],
+        "bos_label": hparams["bos_index"],
+        "eos_label": hparams["eos_index"]
+    }
+    label_encoder.load_or_create(
+        path=lab_enc_file,
+        from_didatasets=[train_data],
+        output_key="char_list",
+        special_labels=special_labels,
+        sequence_input=True,
+    )
+
     # 4. Set output:
     sb.dataio.dataset.set_output_keys(
-        datasets, ["id", "sig", "wrd", "tokens_bos", "tokens_eos", "tokens"],
+        datasets, ["id", "sig", "wrd", "converted_wrd" ,"char_list", "tokens_bos", "tokens_eos", "tokens"],
     )
 
 
@@ -498,7 +535,9 @@ def dataio_prepare(hparams,tokenizer):
         train_data,
         valid_data,
         test_data,
+        label_encoder
     )
+
 
 def prep_exp_dir(hparams):
     save_folder = hparams['save_folder']
@@ -530,23 +569,8 @@ if __name__ == "__main__":
     prep_exp_dir(hparams)
 
 
-    # Defining tokenizer and loading it
-    tokenizer = SentencePiece(
-        model_dir=hparams["save_folder"],
-        vocab_size=hparams["output_neurons"],
-        annotation_train=hparams["train_csv"],
-        annotation_read="wrd",
-        model_type=hparams["token_type"],
-        character_coverage=1.0,
-    )
 
-
-    train_data,valid_data,test_data = dataio_prepare(hparams, tokenizer)
-
-    # # We download the pretrained LM from HuggingFace (or elsewhere depending on
-    # # the path given in the YAML file). The tokenizer is loaded at the same time.
-    # run_on_main(hparams["pretrainer"].collect_files)
-    # hparams["pretrainer"].load_collected(device=run_opts["device"])
+    train_data,valid_data,test_data,label_encoder = dataio_prepare(hparams)
 
     # Trainer initialization
     asr_brain = ASR(
@@ -558,28 +582,61 @@ if __name__ == "__main__":
     )
 
 
-    # We dynamicaly add the tokenizer to our brain class.
-    # NB: This tokenizer corresponds to the one used for the LM!!
-    
-    asr_brain.tokenizer = tokenizer.sp # custom
-    # asr_brain.tokenizer = hparams["tokenizer"] # pretrainer
-    train_dataloader_opts = hparams["train_dataloader_opts"]
-    valid_dataloader_opts = hparams["valid_dataloader_opts"]
-    tokens = {i:asr_brain.tokenizer.id_to_piece(i) for i in range(asr_brain.tokenizer.get_piece_size())}
-    print(f"tokenizer: {tokens}")
+    asr_brain.tokenizer = label_encoder
+    print(f"tokenizer: {asr_brain.tokenizer.lab2ind}")
+    print(f"tokenizer: {len(asr_brain.tokenizer.lab2ind.keys())}")
     # exit()
     
     # asr_brain.modules = asr_brain.modules.float()
     count_parameters(asr_brain.modules)
 
+
+    # Loading the labels for the LM decoding and the CTC decoder
+    if "use_language_modelling" in hparams:
+        if hparams["use_language_modelling"]:
+            try:
+                from pyctcdecode import build_ctcdecoder
+            except ImportError:
+                err_msg = "Optional dependencies must be installed to use pyctcdecode.\n"
+                err_msg += "Install using `pip install kenlm pyctcdecode`.\n"
+                raise ImportError(err_msg)
+
+            ind2lab = label_encoder.ind2lab
+            labels = [ind2lab[x] for x in range(len(ind2lab))]
+            labels = [""] + labels[1:]  # Replace the <blank> token with a blank character, needed for PyCTCdecode
+
+            # labels  = [asr_brain.tokenizer.id_to_piece(id).lower() for id in range(asr_brain.tokenizer.get_piece_size())]
+            # print(f"labels: {labels}")
+            # labels[10]=' ' # '_'
+            # labels[0] = '<pad>' # unk
+
+
+            # labels[0] = '' # unk
+            # print(f"labels: {labels}")
+            # exit()
+
+            asr_brain.decoder = build_ctcdecoder(
+                labels,
+                kenlm_model_path=hparams[
+                    "ngram_lm_path"
+                ],  # either .arpa or .bin file
+                alpha=0.5,  # Default by KenLM
+                beta=1.0,  # Default by KenLM
+            )
+    else:
+        hparams["use_language_modelling"] = False
+    
+
     with torch.autograd.detect_anomaly():
-        asr_brain.fit(
-            asr_brain.hparams.epoch_counter,
-            train_data,
-            valid_data,
-            train_loader_kwargs=hparams["train_dataloader_opts"],
-            valid_loader_kwargs=hparams["valid_dataloader_opts"],
-        )
+        if hparams['train_flag']:
+            asr_brain.fit(
+                asr_brain.hparams.epoch_counter,
+                train_data,
+                valid_data,
+                train_loader_kwargs=hparams["train_dataloader_opts"],
+                valid_loader_kwargs=hparams["valid_dataloader_opts"],
+            )
+
 
     # Testing
     print("Run Eval")
