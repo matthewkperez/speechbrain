@@ -5,6 +5,7 @@ Authors
 """
 import torch
 from speechbrain.dataio.dataio import length_to_mask
+import torch.distributed as dist
 
 
 def Accuracy(log_probabilities, targets, length=None):
@@ -83,3 +84,20 @@ class AccuracyStats:
     def summarize(self):
         """Computes the accuract metric."""
         return self.correct / self.total
+    
+    def summarize_dist(self, device):
+        """Computes the accuracy metric."""
+        # local values
+        correct_tensor = torch.tensor([self.correct]).to(device)
+        total_tensor = torch.tensor([self.total]).to(device)
+
+        # reduce tensors across all processes
+        dist.reduce(correct_tensor, dst=0, op=dist.ReduceOp.SUM, group=dist.group.WORLD)
+        dist.reduce(total_tensor, dst=0, op=dist.ReduceOp.SUM, group=dist.group.WORLD)
+
+        # The accuracy is only computed on the master process
+        if dist.get_rank() == 0:
+            accuracy = correct_tensor / total_tensor
+            return accuracy.item()
+
+        return None

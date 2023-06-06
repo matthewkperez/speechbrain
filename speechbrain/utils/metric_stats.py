@@ -18,7 +18,10 @@ from speechbrain.dataio.dataio import (
     extract_concepts_values,
 )
 from speechbrain.dataio.wer import print_wer_summary, print_alignments
-
+import torch.distributed as dist
+import pickle
+import numpy as np
+import json
 
 class MetricStats:
     """A default class for storing and summarizing arbitrary metrics.
@@ -102,7 +105,8 @@ class MetricStats:
                 scores = multiprocess_evaluation(
                     metric=self.metric, n_jobs=self.n_jobs, **kwargs
                 )
-
+        scores = [scores]
+        print(f"metric_stats - scores: {scores}")
         self.scores.extend(scores)
 
     def summarize(self, field=None):
@@ -346,6 +350,54 @@ class ErrorRateStats(MetricStats):
             return self.summary[field]
         else:
             return self.summary
+    
+    def summarize_dist(self, device, field=None):
+        """Summarize the error_rate and return relevant statistics.
+
+        * See MetricStats.summarize()
+        """
+        with open(f'scores_rank{dist.get_rank()}.json', 'w') as f:
+            json.dump([score for score in self.scores], f)
+
+
+        # Wait for all processes to finish writing
+        dist.barrier()
+
+        # Combine results only on the master process
+        if dist.get_rank() == 0:
+            all_scores = []
+            for rank in range(dist.get_world_size()):
+                # Read scores from file
+                with open(f'scores_rank{rank}.json', 'r') as f:
+                    json_file = json.load(f)
+                    all_scores.extend(json_file)
+            all_scores = self.filter_dups(all_scores)
+
+            self.summary = wer_summary(all_scores)
+
+            self.scores = all_scores
+
+            # Add additional, more generic key
+            self.summary["error_rate"] = self.summary["WER"]
+
+            if field is not None:
+                return self.summary[field]
+            else:
+                return self.summary
+    
+    def filter_dups(self,all_scores):
+        '''
+        DDP produces some duplicates
+        Remove these
+        '''
+        tracker = {} # key: count
+        result = []
+        for d in all_scores:
+            if d['key'] not in tracker:
+                tracker[d['key']] = 1
+                result.append(d)
+        return result
+
 
     def write_stats(self, filestream):
         """Write all relevant info (e.g., error rate alignments) to file.
