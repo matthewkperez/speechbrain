@@ -1,0 +1,13 @@
+srun \
+ --job-name=interactive \
+ --mail-user=mkperez@umich.edu \
+ --mail-type=NONE \
+ --nodes=1 \
+ --ntasks-per-node=4 \
+ --cpus-per-task=4 \
+ --mem-per-cpu=11G \
+ --time=5-00:00:00 \
+ --partition=spgpu \
+ --gres=gpu:2 \
+ --account=emilykmp1 \
+ --pty bash
